@@ -59,8 +59,8 @@ final class AIInputProcessor: @unchecked Sendable {
     /// Called only by the tap. No wait, conversion, ring writes, or large allocation here.
     func enqueue(_ input: AVAudioPCMBuffer) {
         guard !tapFailed, input.frameLength > 0 else { return }
-        guard input.format.isEqual(nativeFormat), input.frameLength <= slots[0].frameCapacity else {
-            rejectInput("Native input format or buffer size changed. Tap Start Capture to retry.")
+        guard input.format.isEqual(nativeFormat) else {
+            rejectInput("Native input format changed. Tap Start Capture to retry.")
             return
         }
         guard freeSlots.wait(timeout: .now()) == .success else {
@@ -68,9 +68,9 @@ final class AIInputProcessor: @unchecked Sendable {
             return
         }
         let slot = slots[nextSlot]
-        guard copy(input, to: slot) else {
+        if let reason = copy(input, to: slot) {
             freeSlots.signal()
-            rejectInput("Unable to copy native PCM input.")
+            rejectInput("Unable to copy native PCM input: \(reason)")
             return
         }
         nextSlot = (nextSlot + 1) % slots.count
@@ -114,18 +114,44 @@ final class AIInputProcessor: @unchecked Sendable {
         return buffer
     }
 
-    private func copy(_ input: AVAudioPCMBuffer, to destination: AVAudioPCMBuffer) -> Bool {
-        let source = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input.audioBufferList))
-        let target = UnsafeMutableAudioBufferListPointer(destination.mutableAudioBufferList)
-        guard source.count == target.count else { return false }
-        let byteCount = Int(input.frameLength) * Int(nativeFormat.streamDescription.pointee.mBytesPerFrame)
-        destination.frameLength = input.frameLength
-        for index in source.indices {
-            guard Int(source[index].mDataByteSize) >= byteCount, Int(target[index].mDataByteSize) >= byteCount,
-                  let sourceData = source[index].mData, let targetData = target[index].mData else { return false }
-            memcpy(targetData, sourceData, byteCount)
+    /// nil means success; failure diagnostics contain only layout/size metadata, never PCM samples.
+    private func copy(_ input: AVAudioPCMBuffer, to destination: AVAudioPCMBuffer) -> String? {
+        guard input.format.isEqual(destination.format) else {
+            return "source/target PCM format mismatch"
         }
-        return true
+        guard input.frameLength <= destination.frameCapacity else {
+            return "destination frameCapacity insufficient (required \(input.frameLength), capacity \(destination.frameCapacity))"
+        }
+
+        // Set length before obtaining either list. We only write sample memory, not ABL metadata.
+        destination.frameLength = input.frameLength
+        let source = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input.audioBufferList))
+        let target = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: destination.audioBufferList))
+        guard source.count == target.count else {
+            return "source/target AudioBuffer count mismatch (source \(source.count), target \(target.count))"
+        }
+
+        // For planar PCM, ASBD bytes/frame describes one channel; for interleaved PCM, all channels.
+        // Identical format + frameCapacity guarantees this allocation size for each destination buffer.
+        let bytesPerFrame = Int(input.format.streamDescription.pointee.mBytesPerFrame)
+        let expectedBytes = Int(input.frameLength) * bytesPerFrame
+        let capacityBytes = Int(destination.frameCapacity) * bytesPerFrame
+        for index in source.indices {
+            guard let sourceData = source[index].mData else {
+                return "source mData == nil (buffer \(index))"
+            }
+            guard let targetData = target[index].mData else {
+                return "target mData == nil (buffer \(index))"
+            }
+            let bytesToCopy = Int(source[index].mDataByteSize)
+            guard bytesPerFrame > 0, bytesToCopy > 0,
+                  bytesToCopy == expectedBytes, bytesToCopy <= capacityBytes else {
+                return "invalid source byte count (buffer \(index), bytes \(bytesToCopy), expected \(expectedBytes), capacity \(capacityBytes))"
+            }
+            // mDataByteSize from the read-only source list is valid payload length, not spare capacity.
+            memcpy(targetData, sourceData, bytesToCopy)
+        }
+        return nil
     }
 
     private func rejectInput(_ message: String) {
