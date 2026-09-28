@@ -6,6 +6,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000007 /* DeviceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* DeviceCoordinator.swift */; };
+		A10000000000000000000008 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* HapticManager.swift */; };
 		A10000000000000000000006 /* NetworkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* NetworkManager.swift */; };
 		A10000000000000000000005 /* AIInputProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AIInputProcessor.swift */; };
 		A10000000000000000000004 /* AIInputBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AIInputBuffer.swift */; };
@@ -15,6 +17,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A20000000000000000000009 /* DeviceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCoordinator.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* NetworkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000006 /* AIInputProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInputProcessor.swift; sourceTree = "<group>"; };
@@ -50,6 +54,7 @@
 				A20000000000000000000002 /* ContentView.swift */,
 				A40000000000000000000004 /* Audio */,
 				A40000000000000000000005 /* Network */,
+				A40000000000000000000006 /* Haptics */,
 				A20000000000000000000008 /* Info.plist */,
 			);
 			path = MEIT;
@@ -73,8 +78,14 @@
 		};
 		A40000000000000000000005 /* Network */ = {
 			isa = PBXGroup;
-			children = (A20000000000000000000007 /* NetworkManager.swift */,);
+			children = (A20000000000000000000007 /* NetworkManager.swift */, A20000000000000000000009 /* DeviceCoordinator.swift */,);
 			path = Network;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Haptics */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000010 /* HapticManager.swift */,);
+			path = Haptics;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,6 +151,8 @@
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,
 				A10000000000000000000004 /* AIInputBuffer.swift in Sources */,
 				A10000000000000000000006 /* NetworkManager.swift in Sources */,
+				A10000000000000000000007 /* DeviceCoordinator.swift in Sources */,
+				A10000000000000000000008 /* HapticManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

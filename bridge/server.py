@@ -1,22 +1,28 @@
-"""Single-request-at-a-time LAN bridge. No audio is written to disk."""
+"""Concurrent LAN HTTP bridge with serialized AI inference. No audio is saved."""
 import argparse
 import json
 import os
 import socket
 import sys
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+from urllib.parse import parse_qs, urlsplit
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from meit_ai_adapter import MEITAIAdapter, PAYLOAD_BYTES
+from coordination import Coordinator, ProtocolError, RMS_MAX_AGE_SECONDS, DIRECTION_MARGIN_DB
 
 METADATA = {"X-Audio-Sample-Rate": "16000", "X-Audio-Channels": "1",
             "X-Audio-Format": "pcm16le", "X-Audio-Samples": "40000"}
 
 
-class BridgeServer(HTTPServer):
-    # HTTPServer deliberately serializes inference; the existing model need not be thread-safe.
-    def __init__(self, address, adapter):
+class BridgeServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, adapter, coordinator=None):
         self.adapter = adapter
+        self.coordinator = coordinator if coordinator is not None else Coordinator()
+        self.inference_lock = threading.Lock()
         super().__init__(address, BridgeHandler)
 
     def handle_error(self, request, client_address):
@@ -72,14 +78,66 @@ class BridgeHandler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
-        if self.path != "/health":
-            self.fail(404, "not_found", "Use GET /health or POST /infer.")
-            return
-        self.reply(200, {"status": "ok"})
+        coordinator = self.server.coordinator
+        try:
+            path = urlsplit(self.path)
+            if path.path == "/health" and not path.query:
+                result = {"status": "ok"}
+            elif path.path == "/devices" and not path.query:
+                result = coordinator.list_devices()
+            elif path.path == "/direction" and not path.query:
+                result = coordinator.selection().result
+            elif path.path == "/device/command":
+                query = parse_qs(path.query, keep_blank_values=True, max_num_fields=4)
+                if set(query) != {"device_id", "role"} or any(len(v) != 1 for v in query.values()):
+                    raise ProtocolError(400, "invalid_query", "Expected one device_id and role.")
+                result = coordinator.poll({key: value[0] for key, value in query.items()})
+            else:
+                raise ProtocolError(404, "not_found", "Unknown bridge endpoint.")
+            self.reply(200, result)
+        except ProtocolError as error:
+            self.fail(error.status, error.code, error.message)
+        except ValueError:
+            self.fail(400, "invalid_query", "Invalid endpoint or query.")
+
+    def json_body(self):
+        if self.headers.get_all("Transfer-Encoding") or self.headers.get_all("Content-Encoding"):
+            raise ProtocolError(400, "invalid_encoding", "Send uncompressed JSON with Content-Length.")
+        if self.headers.get_all("Content-Type") != ["application/json"]:
+            raise ProtocolError(400, "invalid_content_type", "Expected application/json.")
+        lengths = self.headers.get_all("Content-Length") or []
+        if len(lengths) != 1 or len(lengths[0]) > 4 or not lengths[0].isascii() or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 4096:
+            raise ProtocolError(400, "invalid_length", "JSON body must be 1 to 4096 bytes.")
+        try:
+            body = self.rfile.read(int(lengths[0]))
+            if len(body) != int(lengths[0]):
+                raise ValueError()
+            value = json.loads(body)
+            if not isinstance(value, dict):
+                raise ValueError()
+            return value
+        except socket.timeout:
+            raise ProtocolError(408, "body_timeout", "JSON body read timed out.") from None
+        except (ValueError, UnicodeError):
+            raise ProtocolError(400, "invalid_json", "Expected a complete JSON object.") from None
 
     def do_POST(self):
+        coordinator = self.server.coordinator
+        if self.path in ("/device/register", "/device/rms", "/direction/test-haptic"):
+            try:
+                body = self.json_body()
+                if self.path == "/device/register":
+                    result = coordinator.register(body)
+                elif self.path == "/device/rms":
+                    result = coordinator.report_rms(body)
+                else:
+                    result = coordinator.test_haptic()
+                self.reply(200, result)
+            except ProtocolError as error:
+                self.fail(error.status, error.code, error.message)
+            return
         if self.path != "/infer":
-            self.fail(404, "not_found", "Use GET /health or POST /infer.")
+            self.fail(404, "not_found", "Unknown bridge endpoint.")
             return
         if self.headers.get_all("Transfer-Encoding"):
             self.fail(400, "transfer_encoding", "Chunked input is not supported.")
@@ -108,7 +166,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self.fail(400, "incomplete_body", "PCM body is shorter than Content-Length.")
             return
         try:
-            result = self.server.adapter.infer(payload)
+            with self.server.inference_lock:
+                # Capture fresh RMS immediately before model execution, not after its latency.
+                selected = coordinator.selection()
+                result = self.server.adapter.infer(payload)
+                result = coordinator.after_inference(result, selected)
         except Exception as error:
             # Keep private paths and model internals out of the HTTP response and logs.
             print(f"Inference failed ({type(error).__name__}).", file=sys.stderr)
@@ -122,12 +184,18 @@ def main():
     parser.add_argument("--ai-path", default=os.environ.get("MEIT_AI_PATH"))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--rms-max-age-ms", type=float, default=RMS_MAX_AGE_SECONDS * 1000)
+    parser.add_argument("--direction-margin-db", type=float, default=DIRECTION_MARGIN_DB)
     args = parser.parse_args()
     if not args.ai_path:
         parser.error("Set MEIT_AI_PATH or --ai-path to the existing meit-ai repository.")
     try:
+        coordinator = Coordinator(rms_max_age=args.rms_max_age_ms / 1000, margin_db=args.direction_margin_db)
+    except ValueError as error:
+        parser.error(str(error))
+    try:
         adapter = MEITAIAdapter(args.ai_path)
-        server = BridgeServer((args.host, args.port), adapter)
+        server = BridgeServer((args.host, args.port), adapter, coordinator)
     except Exception as error:
         print(f"Bridge startup failed ({type(error).__name__}). Check AI path, dependencies, "
               "SavedModel/calibration, and whether the port is already in use.", file=sys.stderr)

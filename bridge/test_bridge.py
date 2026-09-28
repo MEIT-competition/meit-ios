@@ -47,7 +47,9 @@ class ProtocolTests(unittest.TestCase):
         body = bytes(PAYLOAD_BYTES)
         status, response = self.request("POST", "/infer", body, self.headers)
         self.assertEqual(status, 200)
-        self.assertEqual(response, self.adapter.infer.return_value)
+        self.assertEqual({key: response[key] for key in self.adapter.infer.return_value}, self.adapter.infer.return_value)
+        self.assertEqual(response["direction"], "unknown")
+        self.assertFalse(response["haptic"]["queued"])
         self.adapter.infer.assert_called_once_with(body)
 
     def test_invalid_metadata_never_reaches_ai(self):

@@ -1,24 +1,26 @@
 # MEIT iOS
 
-현재 단계: **Phase 3 - iPhone PCM snapshot → HTTP → Windows → existing meit-ai inference → result**.
+현재 단계: **Phase 4 - Multi-iPhone coordination / RMS-based direction / targeted iPhone haptics**.
 
-Phase 3은 구현되었으며 실제 iPhone end-to-end 검증이 필요하다.
+Phase 4: **implemented / device validation pending**. 실제 iPhone 4대 검증 전이다.
 
 | 단계 | 범위 | 검증 상태 |
 |---|---|---|
 | Phase 0 | GitHub Actions unsigned IPA build | 실제 빌드·Sideloadly 설치·앱 실행 확인 |
 | Phase 1 | iPhone microphone capture + RMS | 권한, 48,000 Hz / mono, RMS, Start/Stop 실기기 확인 |
 | Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 실기기 40000 samples / 80000 bytes / 2.500 s / snapshot 확인 |
-| Phase 3 | 한 iPhone의 수동 snapshot → Windows 기존 AI → 결과 표시 | Windows bridge 테스트·실제 모델 loopback 확인, Actions·실기기 검증 필요 |
+| Phase 3 | 한 iPhone의 수동 snapshot → Windows 기존 AI → 결과 표시 | 실제 Wi-Fi end-to-end inference 확인 |
+| Phase 4 | FRONT / RIGHT / BACK / LEFT, RMS 방향, 해당 iPhone haptic | 구현됨, 실제 4-phone 검증 필요 |
 
-Phase 0–2의 실제 기기 실행 결과는 사용자 확인에 근거한다.
+Phase 0–3의 실제 기기 실행 결과는 사용자 확인에 근거한다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
 Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예정이다.
 현재 앱은 실제 입력의 RMS(dBFS)와 변환된 AI 입력 버퍼의 규격·준비 상태를 표시한다.
 Phase 3에서는 수동 HTTP snapshot 전송과 기존 meit-ai 결과 표시를 추가한다.
-여러 기기 연결, 자동 추론 루프, 방향 추정, 햅틱, 녹음 파일 저장은 구현하지 않는다.
+Phase 4에서는 네 역할의 RMS 보고·방향 추정과 해당 iPhone 진동을 추가한다.
+자동 추론 루프, TDoA, 자동 audio 선택, 녹음 파일 저장은 구현하지 않는다.
 
 ## 프로젝트
 
@@ -37,7 +39,10 @@ meit-ios/
 │       ├── MEITApp.swift
 │       ├── ContentView.swift
 │       ├── Info.plist
-│       ├── Network/NetworkManager.swift
+│       ├── Network/
+│       │   ├── NetworkManager.swift
+│       │   └── DeviceCoordinator.swift
+│       ├── Haptics/HapticManager.swift
 │       └── Audio/
 │           ├── AudioCaptureManager.swift
 │           ├── AIInputProcessor.swift
@@ -45,6 +50,8 @@ meit-ios/
 ├── bridge/
 │   ├── server.py
 │   ├── meit_ai_adapter.py
+│   ├── coordination.py
+│   ├── test_coordination.py
 │   ├── test_bridge.py
 │   └── README.md
 ├── .github/workflows/ios-build.yml
@@ -236,9 +243,36 @@ Snapshot은 16 kHz mono PCM16LE, 40,000 samples / 80,000 bytes / 2.500 s이며 W
 모델 소스·weights·dataset은 이 public repository로 복사하지 않는다.
 
 Windows에서 단위 테스트와 합성 무음 snapshot의 실제 SavedModel HTTP 추론을 확인했다.
-실제 iPhone → Wi-Fi → Windows → 결과 표시와 이번 Swift 변경의 Actions 빌드는 아직 확인하지 않았다.
+이후 사용자가 실제 iPhone → Wi-Fi → Windows → 결과 표시까지 확인했다.
+이 기록은 Phase 3 검증이며, 이번 Phase 4 변경의 빌드·기기 검증과 구분한다.
 **실행 명령, HTTP 계약, 방화벽 및 기기 테스트는 [bridge/README.md](bridge/README.md)를 따른다.**
 기존 Audio 소스와 unsigned IPA workflow는 변경하지 않았다.
+
+## Phase 4 네 기기 coordination
+
+동일 앱에서 FRONT / RIGHT / BACK / LEFT 중 역할을 선택한다. 역할과 최초 생성 UUID는
+UserDefaults에 저장되며 실제 ID/IP를 소스에 넣지 않는다. Test Connection 성공 후 foreground에서
+등록·command polling을 시작하고, capture 중에만 기존 RMS를 약 10 Hz로 보고한다.
+수동 Send Snapshot 동작과 기존 80,000-byte PCM 계약은 유지한다.
+
+- `DeviceCoordinator.swift`: 역할·ID, 약 100 ms RMS 보고, 약 200 ms command polling.
+  각 루프는 한 요청을 await하므로 backlog를 만들지 않는다. 네트워크 실패는 capture를 멈추지 않는다.
+- `HapticManager.swift`: Test Haptic과 서버 명령에 동일한 Core Haptics 3-pulse 패턴을 사용한다.
+  engine 재사용, recording 중 haptic 허용, foreground 검사, 오류 표시를 포함한다.
+- `bridge/coordination.py`: 서버 수신 monotonic 시각, fresh RMS 500 ms, online timeout 5초,
+  네 역할 모두 fresh일 때만 corrected RMS 최대값과 runner-up 차이로 방향을 결정한다.
+  기본 margin은 3 dB이며 CLI로 조정 가능하다. calibration offset은 기기별 0 dB다.
+- `bridge/server.py`: HTTP는 threaded, AI는 별도 lock으로 직렬화한다. 추론 시작 직전 방향을
+  고정해 결과에 붙이며 `normal`은 진동을 만들지 않는다. `horn/siren/crash`이고 방향이 확정되면
+  해당 기기에만 명령을 생성한다. 기기당 pending 1개, TTL 2초이며 polling에서 한 번 소비한다.
+
+부족한 역할, stale RMS, 역할 충돌, margin 부족은 UNKNOWN으로 표시한다.
+자동 AI inference, TDoA, class별 진동 패턴, background 보장, 자동 calibration은 포함하지 않는다.
+
+Windows 단위 테스트는 기존 Phase 3 동작과 registration/conflict/stale/margin/command/병렬 요청을
+검증한다. **실제 4-phone 검증 전이므로 Phase 4 완료로 표시하지 않는다.**
+설정값, HTTP 예제, 전달 손실·중복 방지 정책과 정확한 네 대 테스트 순서는
+[bridge/README.md](bridge/README.md)의 Phase 4 절을 따른다.
 
 ## GitHub Actions 빌드
 
@@ -329,11 +363,11 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 
 ## 검증 상태와 범위
 
-작성 환경은 **Windows이며 Xcode가 없다**. Phase 0–2의 실제 기기 검증은 사용자 확인으로
-완료했다. **이번 Phase 3 Swift 변경의 macOS/Xcode 컴파일·실제 LAN 기기 검증은 아직 수행하지 않았다.**
-Windows에서는 bridge 단위 테스트, 기존 SavedModel의 실제 loopback HTTP 추론, 프로젝트·plist·소스
-정적 검토를 수행했다. 합성 무음 입력의 모델 실행을 iPhone 녹음 분류 정확도 검증으로 간주하지 않는다.
-기존 unsigned workflow로 빌드한 뒤 bridge 문서의 iPhone 테스트를 수행해야 한다.
+작성 환경은 **Windows이며 Xcode가 없다**. Phase 0–3의 실제 기기 검증은 사용자 확인으로
+완료했다. **이번 Phase 4의 Xcode 컴파일·Core Haptics·네 iPhone LAN 동작은 아직 검증하지 않았다.**
+Windows bridge의 기존·신규 단위 테스트 및 정적 검토를 수행한다. 가상 device/합성 PCM으로
+실행한 검증은 실제 microphone 감도·방향 정확도·물리적인 진동을 확인한 것이 아니다.
+기존 unsigned workflow로 빌드한 뒤 bridge 문서의 네 iPhone 테스트를 수행해야 한다.
 
 runner 이미지와 기본 Xcode는 갱신될 수 있다. 각 실행의 **Set up job**과
 **Inspect Xcode and iOS SDK** 로그를 기준으로 빌드 환경을 확인한다.

@@ -5,10 +5,14 @@ struct AIInferenceResult: Decodable {
     let label: String
     let confidence: Double
     let inferenceMilliseconds: Double
+    let direction: String?
+    let directionMarginDB: Double?
 
     enum CodingKeys: String, CodingKey {
         case label, confidence
         case inferenceMilliseconds = "inference_ms"
+        case direction
+        case directionMarginDB = "direction_margin_db"
     }
 }
 
@@ -17,7 +21,7 @@ private struct BridgeErrorResponse: Decodable {
     let error: Detail
 }
 
-private struct NetworkFailure: LocalizedError {
+struct NetworkFailure: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 }
@@ -51,17 +55,26 @@ final class NetworkManager: ObservableObject {
 
     private var operation: Task<Void, Never>?
     private var operationID: UUID?
-    private let session: URLSession = {
+    private let session = NetworkManager.makeSession(resourceTimeout: 60)
+    private let coordinationSession = NetworkManager.makeSession(resourceTimeout: 1)
+
+    nonisolated private static func makeSession(resourceTimeout: TimeInterval) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
-        config.waitsForConnectivity = true
+        config.waitsForConnectivity = resourceTimeout > 1
         config.timeoutIntervalForRequest = 10
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForResource = resourceTimeout
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         config.httpShouldSetCookies = false
         config.urlCredentialStorage = nil
         return URLSession(configuration: config, delegate: RejectRedirects(), delegateQueue: nil)
-    }()
+    }
+
+    // Separate from the manual operation: RMS/polls must keep running during inference.
+    func coordinationRequest(path: String, body: Data? = nil,
+                             query: [URLQueryItem] = []) async throws -> Data {
+        try await request(path: path, body: body, query: query, coordination: true)
+    }
 
     func testConnection() {
         run(sending: false) { [self] in
@@ -147,7 +160,7 @@ final class NetworkManager: ObservableObject {
         }
     }
 
-    private func endpoint(path: String) throws -> URL {
+    private func endpoint(path: String, query: [URLQueryItem]) throws -> URL {
         let parts = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: ".", omittingEmptySubsequences: false)
         let octets = parts.compactMap { UInt8($0) }
@@ -161,26 +174,31 @@ final class NetworkManager: ObservableObject {
         components.host = octets.map { String($0) }.joined(separator: ".")
         components.port = 8765
         components.path = path
+        if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else {
             throw NetworkFailure(message: "Invalid server address.")
         }
         return url
     }
 
-    private func request(path: String, body: Data? = nil) async throws -> Data {
-        var request = URLRequest(url: try endpoint(path: path))
-        request.timeoutInterval = body == nil ? 10 : 60
+    private func request(path: String, body: Data? = nil, query: [URLQueryItem] = [],
+                         coordination: Bool = false) async throws -> Data {
+        var request = URLRequest(url: try endpoint(path: path, query: query))
+        request.timeoutInterval = coordination ? 1 : (body == nil ? 10 : 60)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             request.httpMethod = "POST"
             request.httpBody = body
-            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            request.setValue("16000", forHTTPHeaderField: "X-Audio-Sample-Rate")
-            request.setValue("1", forHTTPHeaderField: "X-Audio-Channels")
-            request.setValue("pcm16le", forHTTPHeaderField: "X-Audio-Format")
-            request.setValue("40000", forHTTPHeaderField: "X-Audio-Samples")
+            request.setValue(coordination ? "application/json" : "application/octet-stream", forHTTPHeaderField: "Content-Type")
+            if !coordination {
+                request.setValue("16000", forHTTPHeaderField: "X-Audio-Sample-Rate")
+                request.setValue("1", forHTTPHeaderField: "X-Audio-Channels")
+                request.setValue("pcm16le", forHTTPHeaderField: "X-Audio-Format")
+                request.setValue("40000", forHTTPHeaderField: "X-Audio-Samples")
+            }
         }
-        let (data, response) = try await session.data(for: request)
+        let transport = coordination ? coordinationSession : session
+        let (data, response) = try await transport.data(for: request)
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, data.count <= 16_384,
               http.mimeType == "application/json" else {

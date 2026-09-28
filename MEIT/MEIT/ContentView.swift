@@ -4,6 +4,8 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var audio = AudioCaptureManager()
     @StateObject private var network = NetworkManager()
+    @StateObject private var devices = DeviceCoordinator()
+    @StateObject private var haptics = HapticManager()
     @Environment(\.scenePhase) private var scenePhase
     @State private var snapshotInfo: String?
     @State private var checkingSnapshot = false
@@ -85,11 +87,15 @@ struct ContentView: View {
                 }
                 Divider()
                 serverControls
+                Divider()
+                deviceControls
             }
             .padding()
         }
         .onAppear { audio.refreshPermission() }
         .onDisappear {
+            devices.disconnect()
+            haptics.stop()
             audio.stopCapture()
             network.cancel()
         }
@@ -97,12 +103,25 @@ struct ContentView: View {
             snapshotInfo = nil
             if !capturing { network.cancel() }
         }
+        .onChange(of: network.serverAddress) { _, _ in devices.disconnect() }
+        .onChange(of: network.connectionStatus) { _, status in
+            if status == "Connected", scenePhase == .active {
+                devices.connect(network: network, audio: audio, haptics: haptics)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                devices.disconnect()
+                haptics.stop()
+            }
             if phase == .background {
                 audio.stopCapture()
                 network.cancel()
             } else if phase == .active {
                 audio.refreshPermission()
+                if network.connectionStatus == "Connected" {
+                    devices.connect(network: network, audio: audio, haptics: haptics)
+                }
             }
         }
     }
@@ -134,12 +153,48 @@ struct ContentView: View {
                 Text("Label: \(result.label)")
                 Text(String(format: "Confidence: %.1f%%", result.confidence * 100))
                 Text(String(format: "Inference: %.1f ms", result.inferenceMilliseconds))
+                Text("AI Direction: \(result.direction?.uppercased() ?? "UNKNOWN")")
+                if let margin = result.directionMarginDB {
+                    Text(String(format: "AI Direction Margin: %.1f dB", margin))
+                }
             }
             if let error = network.errorMessage {
                 Text("Network Error: \(error)")
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
             }
+        }
+    }
+
+    private var deviceControls: some View {
+        VStack(spacing: 12) {
+            Text("Device").font(.headline)
+            Picker("Device Role", selection: $devices.role) {
+                ForEach(DeviceRole.allCases, id: \.self) { role in
+                    Text(role.rawValue.uppercased()).tag(role)
+                }
+            }
+            .pickerStyle(.menu)
+            Text("Device ID: \(devices.deviceID.prefix(8))...").font(.caption)
+            Text("Registration: \(devices.registration)")
+            Text("RMS: \(devices.rmsStatus)").font(.caption)
+            Text("Direction").font(.headline)
+            Text(devices.direction?.direction.uppercased() ?? "UNKNOWN")
+            if let direction = devices.direction {
+                if let margin = direction.marginDB {
+                    Text(String(format: "Margin: %.1f dB", margin))
+                }
+                Text(direction.detail).font(.caption)
+            }
+            Button("Test Haptic") { haptics.play() }
+                .disabled(!haptics.isSupported)
+            Text("Haptic: \(haptics.isSupported ? haptics.status : "Unsupported")")
+                .font(.caption)
+            Button("Test Direction + Haptic") { devices.testDirectionHaptic() }
+                .disabled(!devices.isRegistered || devices.testingDirection || network.isBusy)
+            if let result = devices.testResult { Text(result).font(.caption) }
+            if let error = devices.networkError { Text(error).foregroundStyle(.red) }
+            if let error = haptics.errorMessage { Text("Haptic Error: \(error)").foregroundStyle(.red) }
         }
     }
 }
