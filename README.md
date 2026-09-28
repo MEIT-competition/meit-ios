@@ -1,14 +1,19 @@
 # MEIT iOS
 
-현재 단계: **Phase 1 - Microphone capture and real-time RMS (dBFS)**.
+현재 단계: **Phase 2 - Native PCM → 16 kHz mono PCM16 / 2.5-second rolling AI input buffer**.
 
-Phase 0 - iOS build pipeline validation: GitHub Actions 빌드와 unsigned IPA 생성,
-Sideloadly를 통한 실제 iPhone 설치·앱 실행을 사용자 확인으로 완료했다.
+| 단계 | 범위 | 검증 상태 |
+|---|---|---|
+| Phase 0 | GitHub Actions unsigned IPA build | 실제 빌드·Sideloadly 설치·앱 실행 확인 |
+| Phase 1 | iPhone microphone capture + RMS | 권한, 48,000 Hz / mono, RMS, Start/Stop 실기기 확인 |
+| Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 구현 완료, Actions·실기기 검증 전 |
+
+Phase 0/1의 실제 실행 결과는 사용자 확인에 근거한다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
 Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예정이다.
-현재 앱은 마이크 권한을 요청하고, 실제 입력의 RMS(dBFS)를 실시간 표시한다.
+현재 앱은 실제 입력의 RMS(dBFS)와 변환된 AI 입력 버퍼의 규격·준비 상태를 표시한다.
 네트워크/Wi-Fi, meit-ai 연결, 여러 기기 연결, 방향 추정, 햅틱, 녹음 파일 저장은 구현하지 않는다.
 
 ## 프로젝트
@@ -27,14 +32,19 @@ meit-ios/
 │   └── MEIT/
 │       ├── MEITApp.swift
 │       ├── ContentView.swift
-│       └── Audio/AudioCaptureManager.swift
+│       └── Audio/
+│           ├── AudioCaptureManager.swift
+│           ├── AIInputProcessor.swift
+│           └── AIInputBuffer.swift
 ├── .github/workflows/ios-build.yml
 ├── .gitignore
 └── README.md
 ```
 
 `MEITApp.swift`는 앱 진입점, `ContentView.swift`는 상태·버튼·오류를 표시하는 화면이다.
-`Audio/AudioCaptureManager.swift`는 권한·오디오 세션·엔진·RMS와 캡처 수명주기를 관리한다.
+`Audio/AudioCaptureManager.swift`는 기존 권한·세션·엔진·RMS를 유지하며 AI 처리 수명주기를 연결한다.
+`Audio/AIInputProcessor.swift`는 제한된 PCM 복사 큐와 AVAudioConverter를 관리한다.
+`Audio/AIInputBuffer.swift`는 규격, 40,000-sample ring buffer, immutable snapshot을 정의한다.
 `project.pbxproj`는 타깃·소스·빌드 설정을 정의하고, 공유 `MEIT.xcscheme`은 CI에서
 같은 scheme을 찾도록 한다. `.gitignore`는 빌드 산출물과 Xcode 개인 설정을 제외한다.
 
@@ -50,7 +60,8 @@ meit-ios/
   세션 활성화·엔진 시작·세션 비활성화 실패는 화면의 Error에 표시한다.
 - 매 Start마다 새 `AVAudioEngine`을 만들고 input node의 `outputFormat(forBus: 0)`을
   그대로 tap에 사용한다. sample rate와 채널 수가 유효한 Float32 입력인지 먼저 확인한다.
-  44.1/48 kHz를 강제하거나 16 kHz로 바꾸지 않는다. 화면에 실제 Hz와 채널 수를 표시한다.
+  tap의 native 형식을 바꾸지 않는다. 16 kHz 변환은 별도 worker에서만 수행한다.
+  화면의 Native Input에는 실제 Hz와 채널 수를 표시한다.
 - tap에서 모든 채널의 유효 `frameLength`를 `stride`에 맞춰 읽고 Double로 제곱합을 구한다.
   약 0.1초 분량의 sample power를 평균하여 `RMS = sqrt(mean(sample²))`,
   `dBFS = 20 * log10(RMS)`를 계산한다. 채널을 합쳐 위상이 상쇄되는 방식은 사용하지 않는다.
@@ -59,9 +70,9 @@ meit-ios/
   이 값은 디지털 입력 레벨이며 보정된 음압(dB SPL)이 아니다.
 - tap 콜백은 MainActor 밖의 factory에서 만들어 UI actor 격리를 상속하지 않는다.
   tap 전용 계산 객체는 tap 설치 시 한 번 생성하고 콜백만 접근한다.
-  콜백에서 파일·네트워크 I/O, PCM 배열 생성/복사, UI 수정, 동기 대기를 하지 않는다.
-  약 10 Hz로 scalar 결과만 main queue에 비동기 전달하며 모든 공개 상태와 engine 제어는
-  MainActor에서 직렬 처리한다. 전달용 작은 closure 외에 매 buffer 할당을 만들지 않는다.
+  콜백은 기존 RMS 계산과 Phase 2의 사전 할당 슬롯으로의 PCM 복사만 수행한다.
+  파일·네트워크 I/O, PCM 배열 생성, 변환, UI 수정, 동기 대기는 하지 않는다.
+  RMS 숫자만 약 10 Hz로 main queue에 전달하며 공개 상태와 engine 제어는 MainActor에 둔다.
 - Start 중이거나 캡처 중이면 중복 Start를 무시한다. Stop은 먼저 캡처 ID를 무효화하고,
   engine을 멈춘 뒤 설치된 tap만 제거하고 engine을 해제한다. RMS는 -100으로 초기화한다.
   이전 권한 요청의 완료나 늦게 도착한 측정값은 새 캡처를 시작하거나 덮어쓸 수 없다.
@@ -69,11 +80,6 @@ meit-ios/
   media services reset도 캡처를 정리하고 재시작 안내를 표시한다. 자동 재시작이나
   background audio capability는 추가하지 않는다. 권한 팝업의 일시적인 inactive 상태는
   background로 취급하지 않는다.
-
-Phase 2의 native PCM 처리 지점은 tap 안의 `NativeRMSMeter.consume(_:)` 호출부다.
-권한, session, hardware format, tap 수명주기는 재사용할 수 있다. 추후 resampling → mono →
-signed PCM16 → 2.5초 버퍼를 별도 처리기로 추가한다. 현재 변환·전송·PCM 보관은 없다.
-콜백 밖에서 PCM을 사용할 때는 버퍼가 재사용되므로 사전 할당 저장소 등 별도 소유권 설계가 필요하다.
 
 [Apple 권한 API](https://developer.apple.com/documentation/avfaudio/avaudioapplication/requestrecordpermission(completionhandler:)),
 [measurement 모드](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/measurement),
@@ -99,6 +105,112 @@ signed PCM16 → 2.5초 버퍼를 별도 처리기로 추가한다. 현재 변�
    방해 상황이 끝난 뒤 Start로 다시 캡처 가능한지 확인한다.
 8. 가능하면 iPhone 15/16 각각에서 몇 분간 실행한다. 입력이 44.1 kHz 또는 48 kHz일 때 모두
    올바르게 갱신되는지 확인한다. 이번 앱에는 sample rate를 강제하는 기능이 없다.
+
+## Phase 2 변환과 rolling buffer
+
+```text
+Native Float32 PCM (hardware sample rate / channels)
+  → tap: preallocated slot copy
+  → bounded serial worker: equal-weight mono mix (native sample rate)
+  → AVAudioConverter: 16,000 Hz / mono / signed Int16
+  → 40,000-sample circular buffer
+  → makeAIInputSnapshot(): 80,000-byte raw PCM16LE
+```
+
+- native rate에서 16 kHz로 변환하는 지속적인 `AVAudioConverter`를 사용한다.
+  48 kHz 전용 decimation이나 buffer별 sample 수의 정수 나눗셈은 사용하지 않는다.
+  44.1/48 kHz 모두 같은 경로이며, 할당량 보호를 위한 입력 범위는 8…192 kHz / 1…32 ch다.
+- mono는 worker에서 native Float32 채널들을 동일 가중치로 평균한다. 각 채널의 stride를
+  반영하고 비유한 값은 0으로 처리하며 평균을 -1…1로 제한한다. 단일 채널은 그대로 전달한다.
+  별도 channel layout이나 첫 채널 선택에 의존하지 않는다. 역상 채널은 mono 합성 시 상쇄될 수 있다.
+- converter 입력은 native-rate mono Float32, 출력은 `.pcmFormatInt16`, 16,000 Hz,
+  1 channel, interleaved다. sample-rate 품질은 `.high`, prime method는 `.normal`이다.
+  converter가 resampling과 Float32 → signed Int16 변환을 수행한다.
+- converter는 캡처 동안 재사용한다. input block의 요청 frame 수만 제공하고 offset을 진행시켜
+  동일 sample을 중복 공급하지 않는다. 현재 입력을 모두 쓰면 `.noDataNow`를 반환한다.
+  `.inputRanDry`의 부분 출력도 `frameLength`만큼 보관하고 필터·소수 비율 상태는 다음 입력으로
+  이어간다. live buffer마다 `.endOfStream`을 보내거나 converter를 reset하지 않는다.
+  초기 priming/처리 지연 때문에 Ready가 표시되는 벽시계 시각은 Start 후 정확히 2.5초가 아닐 수 있다.
+- ring은 `[Int16]` 40,000개를 한 번 할당한다. write index를 순환하며 오래된 sample을 덮어쓴다.
+  `removeFirst()`나 크기 증가가 없으며 append는 새 sample당 O(1)이다. full 이후에도 계속 갱신된다.
+  최신 **변환 완료** sample 기준 최근 2.5초이며, UI는 큐 처리 및 polling만큼 늦게 표시될 수 있다.
+
+### Threading과 메모리 제한
+
+- native 슬롯 **4개**를 Start 시 할당한다. 슬롯당 capacity는
+  `max(4096, ceil(nativeSampleRate × 0.5))` frames다. tap buffer를 보관하지 않고 유효 PCM만 복사한다.
+  `DispatchSemaphore.wait(timeout: .now())`로 즉시 슬롯을 확보하며 오디오 thread를 기다리게 하지 않는다.
+- FIFO 직렬 worker에 처리 중인 것을 포함해 native 변환 작업은 최대 4개만 존재한다.
+  worker가 작업을 끝낸 뒤에만 슬롯을 재사용한다. mono/feed/output scratch buffer도 재사용한다.
+  tap에서는 작은 dispatch closure 외에 입력 크기에 비례한 메모리를 새로 할당하지 않는다.
+- 슬롯 부족, 예상보다 큰 입력, 형식 변경, 변환 오류는 캡처를 정지시키고 Error를 표시한다.
+  누락된 소리를 이어 붙여 정상적인 연속 2.5초라고 표시하지 않는다. 다시 Start하면 새로 채운다.
+- converter와 ring은 worker에서만 접근한다. `@unchecked Sendable`은 이 소유권 규칙과
+  semaphore 인계를 명시하기 위한 것이며, 임의의 동시 호출을 허용하는 의미가 아니다.
+- MainActor는 약 100 ms마다 **이전 조회가 끝난 뒤** 작은 status를 조회한다. snapshot 요청은
+  한 번에 하나만 허용한다. 따라서 status/snapshot 요청도 무한히 적체되지 않는다.
+  80,000-byte 할당은 실제 snapshot 요청 때만 worker에서 수행한다. 파일·네트워크·AI 처리는 없다.
+
+### Snapshot API와 불변 조건
+
+```swift
+// MainActor에서 호출. buffer 미완성 / 정지 / 다른 snapshot 요청 중이면 nil.
+if let snapshot = await audioCaptureManager.makeAIInputSnapshot() {
+    let payload = snapshot.pcm16LittleEndian  // Data, 바로 전송 가능한 raw PCM bytes
+    // snapshot.sampleRate == 16000
+    // snapshot.channels == 1
+    // snapshot.sampleFormat == "Int16 (PCM16LE)"
+    // snapshot.sampleCount == 40000
+    // snapshot.byteCount == 80000
+    // snapshot.duration == 2.5
+}
+```
+
+full 상태에서만 snapshot을 만들고, 가장 오래된 write index부터 **과거 → 현재** 순서로 복사한다.
+각 Int16을 하위 byte → 상위 byte로 명시적으로 직렬화한다. WAV header는 없는 **signed PCM16,
+little-endian**이며 Windows에서 little-endian signed 16-bit로 그대로 해석할 수 있다.
+2's-complement 예: `-32768 → 00 80`, `-1 → FF FF`, `0 → 00 00`, `32767 → FF 7F`.
+
+길이는 생성 시 runtime guard로 확인한다. Debug assertion은 16 kHz / 1 ch / Int16 2 bytes /
+40,000 samples / 80,000 bytes / 2.5초를 확인하며 Release를 crash시키는 검증은 사용하지 않는다.
+`duration = sampleCount / sampleRate`이고, snapshot은 ring과 별도의 immutable Data다.
+Phase 3은 이 API와 payload를 재사용할 수 있다. 현재 전송 API나 서버는 추가하지 않았다.
+
+### Start / Stop
+
+Start마다 새 processor, converter, 슬롯, 빈 ring을 만든다. Stop은 capture ID를 먼저 무효화하고,
+status task 취소 → engine 정지·tap 제거 → processor 정리 요청 → UI count 초기화를 수행한다.
+worker의 제한된 pending 작업이 끝난 뒤 converter/ring을 reset하고 해제한다.
+그 사이의 이전 status, 오류, snapshot 결과는 capture ID 검사로 무시한다.
+새 캡처는 별도 processor를 사용하므로 이전 PCM·필터 상태가 섞이지 않는다.
+interruption / configuration change / background 처리도 같은 Stop 경로를 사용한다.
+
+[Apple AVAudioConverter sample-rate conversion 안내](https://developer.apple.com/documentation/technotes/tn3136-avaudioconverter-performing-sample-rate-conversions),
+[부분 출력 상태 설명](https://developer.apple.com/documentation/avfaudio/avaudioconverteroutputstatus/inputrandry)
+
+## Phase 2 실제 iPhone 테스트
+
+1. 기존 수동 Actions workflow에서 새 `AIInputBuffer.swift`, `AIInputProcessor.swift`를 포함한
+   컴파일·링크, unsigned 검사, IPA 패키징·업로드가 성공하는지 확인한다. 실패하면 해당 step과
+   `MEIT-build-diagnostics/xcodebuild.log`를 확인한다. workflow 자체는 변경하지 않았다.
+2. 새 IPA를 Sideloadly로 설치한다. Start 후 기존 권한·Native Input·RMS가 Phase 1처럼 동작해야 한다.
+3. AI Input이 `16000 Hz / mono / PCM16 (little-endian)`인지 확인한다. count가 0부터 증가해
+   `40000 / 40000 samples`, `80000 bytes`, `2.500 s`, `AI Buffer Ready`가 되어야 한다.
+   미완성 상태에서는 Check Snapshot 버튼이 비활성화된다.
+4. Check Snapshot을 누르면 **실제 API가 반환한** `40000 samples / 80000 bytes / 2.500 s`가 표시된다.
+   데이터는 저장하거나 전송하지 않는다. 10초 이상 계속 캡처하여 count는 40,000에 머무르지만
+   `Converted total`은 증가하는지, snapshot을 반복 조회해도 RMS가 계속 변하는지 확인한다.
+5. Stop 직후 count/bytes/duration이 0, 상태가 Stopped가 되는지 확인한다. Start → Stop을
+   빠른 조작 포함 10회 이상 반복하고, 매 Start마다 Buffering부터 시작하며 이전 Ready/snapshot이
+   남지 않는지 확인한다. Snapshot 요청 직후 Stop/재시작하는 경우도 확인한다.
+6. buffer가 차는 중과 가득 찬 상태 각각에서 홈 화면·잠금·전화/Siri 중단을 시험한다.
+   정지/안내 후 다시 Start하면 새 빈 buffer로 시작해야 한다. Phase 1의 권한 거부/재허용도 재확인한다.
+7. 가능하면 실제 native 44.1 kHz / 48 kHz와 다채널 입력 환경에서 같은 출력 규격을 확인한다.
+   앱은 native rate나 route를 강제로 변경하지 않는다. 과부하 오류가 발생하면 count가 초기화되고
+   캡처가 정지하는지 확인한다. 아직 과부하·다채널·44.1 kHz 실기기 검증은 수행하지 않았다.
+
+현재 UI 검사는 길이·지속 갱신을 확인하는 절차다. 파형 보존, resampling 품질, ring wrap 시 정확한
+sample 순서와 endian 해석의 자동화된 수치 검증은 아직 수행하지 않았다.
 
 ## GitHub Actions 빌드
 
@@ -189,10 +301,11 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 
 ## 검증 상태와 범위
 
-작성 환경은 **Windows이며 Xcode가 없다**. Phase 0 빌드와 실제 기기 실행은 사용자 확인으로
-완료했으나, **Phase 1 변경은 아직 macOS/Xcode 컴파일 및 실제 마이크 동작을 검증하지 않았다**.
-기존 unsigned workflow는 변경하지 않았다. 위 Actions 및 iPhone 테스트로 권한 설명 생성,
-Swift 컴파일·링크, IPA 패키징, 권한·RMS·반복 Start/Stop을 검증해야 한다.
+작성 환경은 **Windows이며 Xcode가 없다**. Phase 0/1의 실제 기기 검증은 사용자 확인으로
+완료했으나, **Phase 2는 아직 macOS/Xcode 컴파일·converter 실행·실기기 검증 전**이다.
+Windows에서는 프로젝트/소스 참조, 기존 설정·workflow 유지, 규격과 수명주기 코드의 정적 검토만
+수행한다. 실제 Swift 컴파일 성공이나 converter의 수치 정확성을 확인했다고 간주하지 않는다.
+기존 unsigned workflow로 빌드한 뒤 위 Phase 1/2 기기 테스트를 수행해야 한다.
 
 runner 이미지와 기본 Xcode는 갱신될 수 있다. 각 실행의 **Set up job**과
 **Inspect Xcode and iOS SDK** 로그를 기준으로 빌드 환경을 확인한다.

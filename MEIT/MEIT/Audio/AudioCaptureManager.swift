@@ -16,6 +16,7 @@ final class AudioCaptureManager: ObservableObject {
     @Published private(set) var microphonePermission: MicrophonePermission = .notDetermined
     @Published private(set) var errorMessage: String?
     @Published private(set) var inputFormatDescription: String?
+    @Published private(set) var aiBufferStatus = AIInputBufferStatus.empty
 
     private let session = AVAudioSession.sharedInstance()
     private var engine: AVAudioEngine?
@@ -23,6 +24,9 @@ final class AudioCaptureManager: ObservableObject {
     private var sessionActive = false
     private var captureID: UUID?
     private var hasMeterReading = false
+    private var aiProcessor: AIInputProcessor?
+    private var aiStatusTask: Task<Void, Never>?
+    private var snapshotPending = false
     private var engineObserver: AnyCancellable?
     private var sessionObservers = Set<AnyCancellable>()
 
@@ -94,8 +98,15 @@ final class AudioCaptureManager: ObservableObject {
                 throw CaptureError.unavailableInput
             }
 
+            let processor = try AIInputProcessor(nativeFormat: format) { [weak self] message in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.captureID == id else { return }
+                    self.stopForSystemEvent(message)
+                }
+            }
+            aiProcessor = processor
             // Build the audio callback outside MainActor so it does not inherit UI isolation.
-            let tap = NativeRMSMeter.makeTap { [weak self] dbFS in
+            let tap = NativeRMSMeter.makeTap(aiProcessor: processor) { [weak self] dbFS in
                 // Only a scalar crosses threads, at approximately 10 updates per second.
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.captureID == id, self.isCapturing else { return }
@@ -111,6 +122,7 @@ final class AudioCaptureManager: ObservableObject {
             try newEngine.start()
             inputFormatDescription = "\(Int(format.sampleRate)) Hz · \(format.channelCount) channel(s)"
             isCapturing = true
+            monitorAIInput(processor, captureID: id)
 
             engineObserver = NotificationCenter.default.publisher(
                 for: .AVAudioEngineConfigurationChange, object: newEngine
@@ -126,9 +138,35 @@ final class AudioCaptureManager: ObservableObject {
         }
     }
 
+    /// Returns the latest full window, oldest to newest, or nil if not ready/stopped/busy.
+    /// One in-flight request keeps snapshot allocations and queue submissions bounded.
+    func makeAIInputSnapshot() async -> AIInputSnapshot? {
+        guard !snapshotPending, isCapturing, let id = captureID, let processor = aiProcessor else { return nil }
+        snapshotPending = true
+        defer { snapshotPending = false }
+        let snapshot = await processor.makeSnapshot()
+        guard captureID == id, isCapturing else { return nil }
+        return snapshot
+    }
+
+    private func monitorAIInput(_ processor: AIInputProcessor, captureID id: UUID) {
+        aiStatusTask = Task { [weak self] in
+            // Await each small status read: never enqueue an unbounded series of UI updates.
+            while !Task.isCancelled {
+                let status = await processor.status()
+                guard !Task.isCancelled, let self, self.captureID == id else { return }
+                self.aiBufferStatus = status
+                do { try await Task.sleep(for: .milliseconds(100)) }
+                catch { return }
+            }
+        }
+    }
+
     func stopCapture() {
         // Invalidate permission completions and queued readings before touching the engine.
         captureID = nil
+        aiStatusTask?.cancel()
+        aiStatusTask = nil
         isStarting = false
         isCapturing = false
         engineObserver = nil
@@ -138,6 +176,9 @@ final class AudioCaptureManager: ObservableObject {
             tapInstalled = false
         }
         engine = nil
+        aiProcessor?.stop()
+        aiProcessor = nil
+        aiBufferStatus = .empty
         rmsDBFS = -100
         hasMeterReading = false
         inputFormatDescription = nil
@@ -168,15 +209,17 @@ final class AudioCaptureManager: ObservableObject {
 }
 
 // Callback-confined state: create once for each tap; never access it from the UI thread.
-// Phase 2 can consume native PCM at this boundary, with its own buffer ownership strategy.
+// RMS remains native-format; AIInputProcessor copies PCM into its bounded conversion pipeline.
 private final class NativeRMSMeter {
     private var sumOfSquares = 0.0
     private var sampleCount = 0
     private var frameCount = 0
 
-    static func makeTap(onReading: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+    static func makeTap(aiProcessor: AIInputProcessor,
+                        onReading: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
         let meter = NativeRMSMeter()
         return { buffer, _ in
+            aiProcessor.enqueue(buffer)
             guard let dbFS = meter.consume(buffer) else { return }
             onReading(dbFS)
         }

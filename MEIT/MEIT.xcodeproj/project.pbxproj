@@ -6,12 +6,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000005 /* AIInputProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AIInputProcessor.swift */; };
+		A10000000000000000000004 /* AIInputBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AIInputBuffer.swift */; };
 		A10000000000000000000003 /* AudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* AudioCaptureManager.swift */; };
 		A10000000000000000000001 /* MEITApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MEITApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A20000000000000000000006 /* AIInputProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInputProcessor.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* AIInputBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInputBuffer.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* AudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000001 /* MEITApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MEITApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -54,7 +58,11 @@
 		};
 		A40000000000000000000004 /* Audio */ = {
 			isa = PBXGroup;
-			children = (A20000000000000000000004 /* AudioCaptureManager.swift */,);
+			children = (
+				A20000000000000000000004 /* AudioCaptureManager.swift */,
+				A20000000000000000000005 /* AIInputBuffer.swift */,
+				A20000000000000000000006 /* AIInputProcessor.swift */,
+			);
 			path = Audio;
 			sourceTree = "<group>";
 		};
@@ -118,6 +126,8 @@
 				A10000000000000000000001 /* MEITApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
+				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,
+				A10000000000000000000004 /* AIInputBuffer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
