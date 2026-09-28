@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 enum DeviceRole: String, Codable, CaseIterable {
     case front, right, back, left
@@ -33,18 +34,36 @@ private struct DeviceMessage: Encodable {
     let device_id: String
     let role: DeviceRole
     var rms_dbfs: Double? = nil
+    var ai_buffer_ready: Bool? = nil
 }
 
-private struct HapticCommand: Decodable {
+private struct DeviceCommand: Decodable {
     let command_id: String
     let kind: String
     let role: DeviceRole
     let expires_in_ms: Double
+    let event_id: String?
 }
 
 private struct PollResponse: Decodable {
-    let command: HapticCommand?
+    let command: DeviceCommand?
+    let auto: AutoDetectionStatus?
     let direction: DirectionState
+}
+
+struct AutoDetectionStatus: Decodable {
+    struct Event: Decodable {
+        let event_id: String
+        let source_role: String
+        let outcome: String
+        let direction: String
+        let result: AIInferenceResult?
+    }
+    let enabled: Bool
+    let state: String
+    let armed: Bool
+    let active_event: Event?
+    let last_event: Event?
 }
 
 private struct DirectionTestResponse: Decodable {
@@ -74,6 +93,10 @@ final class DeviceCoordinator: ObservableObject {
     @Published private(set) var rmsStatus = "Stopped"
     @Published private(set) var testingDirection = false
     @Published private(set) var testResult: String?
+    @Published private(set) var autoStatus: AutoDetectionStatus?
+    @Published private(set) var changingAuto = false
+    @Published private(set) var sendingAuto = false
+    @Published private(set) var autoMessage: String?
 
     private let defaults: UserDefaults
     private weak var network: NetworkManager?
@@ -83,6 +106,9 @@ final class DeviceCoordinator: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var rmsTask: Task<Void, Never>?
     private var testTask: Task<Void, Never>?
+    private var autoControlTask: Task<Void, Never>?
+    private var autoSnapshotTask: Task<Void, Never>?
+    private var autoSnapshotID: UUID?
     private var handledCommands: [String]
 
     init(defaults: UserDefaults = .standard) {
@@ -117,6 +143,12 @@ final class DeviceCoordinator: ObservableObject {
 
     func disconnect() {
         generation = nil
+        cancelAutomaticSnapshot()
+        autoControlTask?.cancel()
+        autoControlTask = nil
+        changingAuto = false
+        autoStatus = nil
+        autoMessage = nil
         pollTask?.cancel()
         rmsTask?.cancel()
         testTask?.cancel()
@@ -163,11 +195,13 @@ final class DeviceCoordinator: ObservableObject {
                 guard current(id) else { return }
                 let response = try JSONDecoder().decode(PollResponse.self, from: data)
                 direction = response.direction
+                autoStatus = response.auto
+                if response.auto?.enabled != true { cancelAutomaticSnapshot() }
                 networkError = nil
                 if let command = response.command {
                     let elapsed = sent.duration(to: clock.now).components
                     let elapsedMS = Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
-                    if command.kind == "direction_haptic", command.role == role,
+                    if ["direction_haptic", "infer_snapshot"].contains(command.kind), command.role == role,
                        UUID(uuidString: command.command_id) != nil,
                        command.expires_in_ms.isFinite, command.expires_in_ms > elapsedMS,
                        !handledCommands.contains(command.command_id) {
@@ -175,13 +209,21 @@ final class DeviceCoordinator: ObservableObject {
                         handledCommands.append(command.command_id)
                         handledCommands = Array(handledCommands.suffix(32))
                         defaults.set(handledCommands, forKey: "meit.handledCommands")
-                        haptics?.play()
+                        if command.kind == "direction_haptic" {
+                            // Manual Phase 4 commands have no event ID and remain independent.
+                            if command.event_id == nil || response.auto?.enabled == true { haptics?.play() }
+                        } else if response.auto?.enabled == true,
+                                  response.auto?.active_event?.event_id == command.event_id {
+                            requestAutomaticSnapshot(command, remainingMS: command.expires_in_ms - elapsedMS, generation: id)
+                        }
                     }
                 }
             } catch {
                 guard current(id) else { return }
                 isRegistered = false
                 registration = "Failed / Conflict"
+                cancelAutomaticSnapshot()
+                autoStatus = nil
                 direction = nil
                 networkError = error.localizedDescription
                 delay = .seconds(1)
@@ -201,7 +243,8 @@ final class DeviceCoordinator: ObservableObject {
                     guard rms.isFinite, (-100...0).contains(rms) else {
                         throw NetworkFailure(message: "RMS must be finite and within -100...0 dBFS.")
                     }
-                    let body = try JSONEncoder().encode(DeviceMessage(device_id: deviceID, role: role, rms_dbfs: rms))
+                    let body = try JSONEncoder().encode(DeviceMessage(device_id: deviceID, role: role, rms_dbfs: rms,
+                        ai_buffer_ready: audio.aiBufferStatus.isReady && !network.isBusy && !sendingAuto))
                     let data = try await network.coordinationRequest(path: "/device/rms", body: body)
                     guard current(id) else { return }
                     struct Ack: Decodable { let status: String }
@@ -219,6 +262,76 @@ final class DeviceCoordinator: ObservableObject {
             // One awaited request at a time; slow sends coalesce subsequent readings.
             do { try await Task.sleep(until: began.advanced(by: .milliseconds(100)), clock: clock) }
             catch { return }
+        }
+    }
+
+    func cancelAutomaticSnapshot() {
+        autoSnapshotID = nil
+        autoSnapshotTask?.cancel()
+        autoSnapshotTask = nil
+        sendingAuto = false
+    }
+
+    func setAutomaticDetection(_ enabled: Bool) {
+        guard !changingAuto, isRegistered, let network, let id = generation else { return }
+        changingAuto = true
+        autoMessage = nil
+        if !enabled { cancelAutomaticSnapshot() }
+        autoControlTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let data = try await network.coordinationRequest(
+                    path: enabled ? "/auto/start" : "/auto/stop", body: Data("{}".utf8))
+                guard current(id) else { return }
+                autoStatus = try JSONDecoder().decode(AutoDetectionStatus.self, from: data)
+            } catch {
+                guard current(id) else { return }
+                autoMessage = error.localizedDescription
+            }
+            guard current(id) else { return }
+            changingAuto = false
+            autoControlTask = nil
+        }
+    }
+
+    private func requestAutomaticSnapshot(_ command: DeviceCommand, remainingMS: Double, generation id: UUID) {
+        guard !sendingAuto, let eventID = command.event_id, UUID(uuidString: eventID) != nil,
+              UIApplication.shared.applicationState == .active,
+              let audio, audio.isCapturing, audio.aiBufferStatus.isReady,
+              let network, !network.isBusy else {
+            autoMessage = "Auto snapshot unavailable; server will expire the event."
+            return
+        }
+        let operationID = UUID()
+        let sourceRole = role
+        let clock = ContinuousClock()
+        // Bound an untrusted timeout before converting Double to a clock duration.
+        let deadline = clock.now.advanced(by: .milliseconds(Int64(min(remainingMS, 60_000))))
+        autoSnapshotID = operationID
+        sendingAuto = true
+        autoMessage = "Sending automatic snapshot..."
+        autoSnapshotTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let snapshot = await audio.makeAIInputSnapshot() else {
+                    throw NetworkFailure(message: "AI Buffer snapshot unavailable.")
+                }
+                try Task.checkCancellation()
+                guard current(id), autoSnapshotID == operationID, audio.isCapturing,
+                      UIApplication.shared.applicationState == .active, clock.now < deadline else {
+                    throw CancellationError()
+                }
+                try await network.sendAutomaticSnapshot(snapshot, eventID: eventID, deviceID: deviceID, role: sourceRole)
+                guard current(id), autoSnapshotID == operationID else { return }
+                autoMessage = "Automatic snapshot processed."
+            } catch {
+                guard current(id), autoSnapshotID == operationID else { return }
+                autoMessage = "Auto snapshot: \(error.localizedDescription)"
+            }
+            guard current(id), autoSnapshotID == operationID else { return }
+            autoSnapshotID = nil
+            autoSnapshotTask = nil
+            sendingAuto = false
         }
     }
 

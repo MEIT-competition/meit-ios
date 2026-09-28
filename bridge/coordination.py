@@ -42,6 +42,7 @@ class Device:
     latest_rms_dbfs: float | None = None
     latest_rms_timestamp: float | None = None
     calibration_offset_db: float = 0.0
+    ai_buffer_ready: bool = False
     pending: dict | None = None
     command_expires: float = 0.0
 
@@ -110,9 +111,13 @@ class Coordinator:
         rms = payload.get("rms_dbfs")
         if isinstance(rms, bool) or not isinstance(rms, (int, float)) or not -100 <= rms <= 0 or not math.isfinite(rms):
             raise ProtocolError(400, "invalid_rms", "rms_dbfs must be a finite number between -100 and 0.")
+        ready = payload.get("ai_buffer_ready", False)
+        if not isinstance(ready, bool):
+            raise ProtocolError(400, "invalid_readiness", "ai_buffer_ready must be a boolean.")
         with self.lock:
             now = self.clock()
             item = self._device(device_id, role, now)
+            item.ai_buffer_ready = ready
             item.last_seen = item.latest_rms_timestamp = now
             item.latest_rms_dbfs = float(rms)
             return {"status": "ok"}
@@ -131,7 +136,8 @@ class Coordinator:
                             "rms_dbfs": item.latest_rms_dbfs if item else None,
                             "corrected_rms_dbfs": corrected,
                             "rms_age_ms": age * 1000 if age is not None else None,
-                            "online": online, "fresh": is_fresh}
+                            "online": online, "fresh": is_fresh,
+                            "ai_buffer_ready": item.ai_buffer_ready if item else False}
             if not online:
                 missing.append(role)
             elif not is_fresh:
@@ -168,7 +174,7 @@ class Coordinator:
                                  "calibration_offset_db": d.calibration_offset_db}
                                 for d in self.devices.values()], "direction": selection.result}
 
-    def enqueue(self, selection, source):
+    def enqueue(self, selection, source, event_id=None):
         if selection.target is None:
             return {"queued": False, "reason": "direction_unknown"}
         with self.lock:
@@ -184,6 +190,8 @@ class Coordinator:
                 return {"queued": False, "reason": "command_pending"}
             command = {"command_id": str(uuid.uuid4()), "kind": "direction_haptic",
                        "role": item.role, "source": source}
+            if event_id is not None:
+                command["event_id"] = event_id
             item.pending = command
             item.command_expires = now + self.command_ttl
             return {"queued": True, "command_id": command["command_id"], "target_role": item.role}
@@ -213,3 +221,41 @@ class Coordinator:
                 else:
                     command = {**command, "expires_in_ms": (item.command_expires - now) * 1000}
             return {"command": command, "direction": self._selection(now).result}
+
+    def auto_observation(self):
+        """One registry snapshot: source eligibility and direction share the same instant."""
+        with self.lock:
+            selected = self._selection(self.clock())
+            candidates = [(state["corrected_rms_dbfs"], self.devices[state["device_id"]])
+                          for state in selected.result["devices"].values()
+                          if state["fresh"] and state["ai_buffer_ready"]]
+            source = max(candidates, key=lambda pair: pair[0])[1] if candidates else None
+            return selected, (None if source is None else {
+                "device_id": source.device_id, "role": source.role,
+                "registration_id": source.registration_id,
+                "rms_dbfs": source.latest_rms_dbfs + source.calibration_offset_db})
+
+    def enqueue_snapshot(self, source, event_id, timeout):
+        with self.lock:
+            now = self.clock()
+            item = self._device(source["device_id"], source["role"], now)
+            if item.registration_id != source["registration_id"]:
+                return False
+            if item.pending is not None and item.command_expires > now:
+                return False
+            item.pending = {"command_id": str(uuid.uuid4()), "kind": "infer_snapshot",
+                            "event_id": event_id, "role": item.role}
+            item.command_expires = now + timeout
+            return True
+
+    def validate_auto_source(self, source):
+        with self.lock:
+            item = self._device(source["device_id"], source["role"], self.clock())
+            if item.registration_id != source["registration_id"]:
+                raise ProtocolError(409, "source_changed", "Source registration has changed.")
+
+    def cancel_event_commands(self, event_id):
+        with self.lock:
+            for item in self.devices.values():
+                if item.pending is not None and item.pending.get("event_id") == event_id:
+                    item.pending = None

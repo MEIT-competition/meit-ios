@@ -9,6 +9,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from automatic import AutomaticDetection
 from meit_ai_adapter import MEITAIAdapter, PAYLOAD_BYTES
 from coordination import Coordinator, ProtocolError, RMS_MAX_AGE_SECONDS, DIRECTION_MARGIN_DB
 
@@ -19,11 +20,16 @@ METADATA = {"X-Audio-Sample-Rate": "16000", "X-Audio-Channels": "1",
 class BridgeServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, adapter, coordinator=None):
+    def __init__(self, address, adapter, coordinator=None, automatic=None):
         self.adapter = adapter
         self.coordinator = coordinator if coordinator is not None else Coordinator()
+        self.automatic = automatic if automatic is not None else AutomaticDetection(self.coordinator)
         self.inference_lock = threading.Lock()
         super().__init__(address, BridgeHandler)
+
+    def service_actions(self):
+        # serve_forever ticks even when no phone sends another request.
+        self.automatic.tick()
 
     def handle_error(self, request, client_address):
         print("Bridge request failed; connection closed.", file=sys.stderr)
@@ -83,6 +89,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path)
             if path.path == "/health" and not path.query:
                 result = {"status": "ok"}
+            elif path.path == "/auto/status" and not path.query:
+                result = self.server.automatic.status()
             elif path.path == "/devices" and not path.query:
                 result = coordinator.list_devices()
             elif path.path == "/direction" and not path.query:
@@ -91,7 +99,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 query = parse_qs(path.query, keep_blank_values=True, max_num_fields=4)
                 if set(query) != {"device_id", "role"} or any(len(v) != 1 for v in query.values()):
                     raise ProtocolError(400, "invalid_query", "Expected one device_id and role.")
+                self.server.automatic.tick()
                 result = coordinator.poll({key: value[0] for key, value in query.items()})
+                result["auto"] = self.server.automatic.status()
             else:
                 raise ProtocolError(404, "not_found", "Unknown bridge endpoint.")
             self.reply(200, result)
@@ -123,20 +133,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         coordinator = self.server.coordinator
-        if self.path in ("/device/register", "/device/rms", "/direction/test-haptic"):
+        if self.path in ("/device/register", "/device/rms", "/direction/test-haptic", "/auto/start", "/auto/stop"):
             try:
                 body = self.json_body()
                 if self.path == "/device/register":
                     result = coordinator.register(body)
                 elif self.path == "/device/rms":
                     result = coordinator.report_rms(body)
+                    self.server.automatic.observe()
+                elif self.path in ("/auto/start", "/auto/stop"):
+                    result = self.server.automatic.set_enabled(self.path == "/auto/start")
                 else:
                     result = coordinator.test_haptic()
                 self.reply(200, result)
             except ProtocolError as error:
                 self.fail(error.status, error.code, error.message)
             return
-        if self.path != "/infer":
+        if self.path not in ("/infer", "/event/audio"):
             self.fail(404, "not_found", "Unknown bridge endpoint.")
             return
         if self.headers.get_all("Transfer-Encoding"):
@@ -157,6 +170,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if lengths != [str(PAYLOAD_BYTES)]:
             self.fail(400, "invalid_length", "Expected exactly 80000 bytes / 40000 samples.")
             return
+        automatic = self.path == "/event/audio"
+        metadata = {}
+        if automatic:
+            for header, key in (("X-Event-ID", "event_id"), ("X-Device-ID", "device_id"), ("X-Device-Role", "role")):
+                values = self.headers.get_all(header)
+                if values is None or len(values) != 1:
+                    self.fail(400, "invalid_event_metadata", f"Expected one {header} header.")
+                    return
+                metadata[key] = values[0]
         try:
             payload = self.rfile.read(PAYLOAD_BYTES)
         except socket.timeout:
@@ -165,18 +187,39 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if len(payload) != PAYLOAD_BYTES:
             self.fail(400, "incomplete_body", "PCM body is shorter than Content-Length.")
             return
+        claimed = None
         try:
+            if automatic:
+                claimed = self.server.automatic.claim_audio(metadata)
             with self.server.inference_lock:
-                # Capture fresh RMS immediately before model execution, not after its latency.
-                selected = coordinator.selection()
-                result = self.server.adapter.infer(payload)
-                result = coordinator.after_inference(result, selected)
+                if automatic:
+                    self.server.automatic.check_inference(claimed)
+                    result = self.server.adapter.infer_auto(payload)
+                    result = self.server.automatic.complete(claimed, result)
+                else:
+                    # Manual Phase 4 still selects direction immediately before inference.
+                    selected = coordinator.selection()
+                    result = self.server.adapter.infer(payload)
+                    result = coordinator.after_inference(result, selected)
+        except ProtocolError as error:
+            if claimed is not None:
+                self.finish_failed_auto(claimed)
+            self.fail(error.status, error.code, error.message)
+            return
         except Exception as error:
+            if claimed is not None:
+                self.finish_failed_auto(claimed)
             # Keep private paths and model internals out of the HTTP response and logs.
             print(f"Inference failed ({type(error).__name__}).", file=sys.stderr)
             self.fail(500, "inference_failed", "Existing meit-ai inference failed; check bridge terminal.")
             return
         self.reply(200, result)
+
+    def finish_failed_auto(self, event_id):
+        try:
+            self.server.automatic.complete(event_id)
+        except ProtocolError:
+            pass  # Already completed/stopped; never alter a newer event.
 
 
 def main():
@@ -186,16 +229,24 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--rms-max-age-ms", type=float, default=RMS_MAX_AGE_SECONDS * 1000)
     parser.add_argument("--direction-margin-db", type=float, default=DIRECTION_MARGIN_DB)
+    parser.add_argument("--auto-trigger-dbfs", type=float, default=-30.0)
+    parser.add_argument("--auto-cooldown-ms", type=float, default=3000)
+    parser.add_argument("--auto-audio-timeout-ms", type=float, default=3000)
+    parser.add_argument("--auto-rearm-quiet-ms", type=float, default=750)
     args = parser.parse_args()
     if not args.ai_path:
         parser.error("Set MEIT_AI_PATH or --ai-path to the existing meit-ai repository.")
     try:
         coordinator = Coordinator(rms_max_age=args.rms_max_age_ms / 1000, margin_db=args.direction_margin_db)
+        automatic = AutomaticDetection(coordinator, trigger_dbfs=args.auto_trigger_dbfs,
+                                       cooldown=args.auto_cooldown_ms / 1000,
+                                       audio_timeout=args.auto_audio_timeout_ms / 1000,
+                                       rearm_quiet=args.auto_rearm_quiet_ms / 1000)
     except ValueError as error:
         parser.error(str(error))
     try:
         adapter = MEITAIAdapter(args.ai_path)
-        server = BridgeServer((args.host, args.port), adapter, coordinator)
+        server = BridgeServer((args.host, args.port), adapter, coordinator, automatic)
     except Exception as error:
         print(f"Bridge startup failed ({type(error).__name__}). Check AI path, dependencies, "
               "SavedModel/calibration, and whether the port is already in use.", file=sys.stderr)

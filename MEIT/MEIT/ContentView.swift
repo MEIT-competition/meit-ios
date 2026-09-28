@@ -89,6 +89,8 @@ struct ContentView: View {
                 serverControls
                 Divider()
                 deviceControls
+                Divider()
+                automaticControls
             }
             .padding()
         }
@@ -101,7 +103,10 @@ struct ContentView: View {
         }
         .onChange(of: audio.isCapturing) { _, capturing in
             snapshotInfo = nil
-            if !capturing { network.cancel() }
+            if !capturing {
+                devices.cancelAutomaticSnapshot()
+                network.cancel()
+            }
         }
         .onChange(of: network.serverAddress) { _, _ in devices.disconnect() }
         .onChange(of: network.connectionStatus) { _, status in
@@ -163,6 +168,38 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
             }
+        }
+    }
+
+    private var automaticControls: some View {
+        VStack(spacing: 12) {
+            Text("Automatic Detection").font(.headline)
+            Text(devices.autoStatus.map { $0.enabled ? "ON" : "OFF" } ?? "Unavailable")
+            Text("Auto State: \(devices.autoStatus?.state.replacingOccurrences(of: "_", with: " ") ?? "Unavailable")")
+            if let status = devices.autoStatus, status.enabled, !status.armed,
+               status.state == "IDLE" || status.state == "COOLDOWN" {
+                Text("Waiting for quiet before rearming").font(.caption)
+            }
+            Button(devices.autoStatus?.enabled == true ? "Stop Auto Detection" : "Start Auto Detection") {
+                devices.setAutomaticDetection(devices.autoStatus?.enabled != true)
+            }
+            .disabled(!devices.isRegistered || devices.changingAuto
+                      || (devices.autoStatus?.enabled != true && !audio.isCapturing))
+            Text("Global bridge setting; affects all connected phones.").font(.caption)
+            if let active = devices.autoStatus?.active_event {
+                Text("Current source: \(active.source_role.uppercased())")
+            }
+            if let event = devices.autoStatus?.last_event {
+                Text("Last Auto Event").font(.headline)
+                Text("Source: \(event.source_role.uppercased())")
+                Text("Status: \(event.outcome.replacingOccurrences(of: "_", with: " "))")
+                if let result = event.result {
+                    Text("Label: \(result.label)")
+                    Text(String(format: "Confidence: %.1f%%", result.confidence * 100))
+                }
+                Text("Direction: \(event.direction.uppercased())")
+            }
+            if let message = devices.autoMessage { Text(message).font(.caption) }
         }
     }
 

@@ -1,7 +1,8 @@
-# Windows bridge — Phase 3 / Phase 4
+# Windows bridge — Phase 3 / Phase 4 / Phase 5
 
 Phase 3: 사용자 확인으로 실제 iPhone Wi-Fi end-to-end inference 성공.
-Phase 4: **implemented / device validation pending** — 네 실제 iPhone 검증 필요.
+Phase 4: system vibration 및 capture 중 진동은 사용자 실기기 확인 완료. 네 실제 iPhone 동시 방향 검증은 필요.
+Phase 5: **Automatic detection / inference — implemented / device validation pending**.
 Python 표준 라이브러리 HTTP 서버이며 웹 프레임워크를 추가하지 않는다.
 기존 `meit-ai`는 별도 저장소로 유지한다. 소스·모델·학습 데이터는 이 저장소에 넣지 않는다.
 
@@ -21,13 +22,15 @@ Python 표준 라이브러리 HTTP 서버이며 웹 프레임워크를 추가하
 | loading | 기존 `load_model()` / `load_temperature()`의 모듈 캐시 사용 |
 | confidence | 기존 calibration temperature 적용 softmax, 0~1 probability |
 | 다른 진입점 | 파일 입력 `classifier.adapter.predict(path)`와 `model/inference.py` CLI 존재 |
-| 제외한 경로 | `main.py`, `decision`의 threshold/dB gate, 250 ms gating, haptic/logging |
+| 수동 경로에서 제외 | `main.py`, decision gate, AI의 haptic/logging |
+| 자동 알림 판정 | 외부 `decision.judge.judge(probs, direction=-1, db=dbfs)` 직접 재사용 |
 | Python dependency | adapter가 직접 import하는 `numpy`, `tensorflow`, `librosa` |
 
 Bridge는 wire의 signed little-endian Int16을 Float32로 해석하고 `32768.0`으로 나누어
 기존 waveform API에 전달한다. resampling, padding, feature extraction, logits,
 softmax, calibration을 새로 구현하지 않는다. 기존 모델 graph와 preprocessing을 그대로 실행한다.
-결과 dict에서 가장 큰 확률의 기존 label과 그 값을 선택할 뿐 threshold를 추가하지 않는다.
+수동 결과는 가장 큰 확률의 label/confidence를 반환한다. 자동 결과도 같은 값을 표시하며,
+알림 허용 여부만 기존 `decision.judge()`에 맡긴다. 새 confidence threshold는 추가하지 않는다.
 `inference_ms`는 기존 `predict_array()` 호출 시간을 bridge에서 측정한다. 네트워크 왕복 시간은 아니다.
 무음에서도 하나의 label이 반환될 수 있으며, 분류 정확도를 별도로 검증해야 한다. Phase 4 진동은 아래의 class/방향 조건만 사용하는 개발용 동작이다.
 
@@ -304,16 +307,12 @@ unknown, pending 존재, target 변경이면 `queued: false`와 reason을 반환
 - Cancel Request는 iPhone의 응답 대기를 취소한다. 이미 시작된 서버 추론과 그 결과에 따른
   다른 기기의 haptic command 생성까지 취소하는 프로토콜은 이번 단계에 포함하지 않는다.
 
-Core Haptics는 `HapticManager`가 관리한다. Apple 권장 haptics-only 초기화와
-`playsHapticsOnly = true`, 재사용 engine/player, stopped/reset 처리 및 foreground 검사를 사용한다.
-패턴은 0 / 0.12 / 0.24초의 강한 transient 3회이며, 0.5초 이내의 중복 burst는 겹쳐 울리지 않는다.
-미지원/engine 실패는 UI에 표시한다. 실패한 command를 자동 재실행하지 않는다.
-recording 중 기본 haptic 억제를 해제하기 위해 `setAllowHapticsAndSystemSoundsDuringRecording(true)`를
-사용하며 실패해도 capture manager를 중단하지 않는다. Audio session category와 변환 코드는 유지한다.
-**Test Haptic**은 네트워크 없이 같은 manager와 패턴을 사용한다. background haptic은 보장하지 않는다.
-
-근거: [Apple haptic engine 초기화](https://developer.apple.com/documentation/corehaptics/chhapticengine/init%28audiosession%3A%29),
-[recording 중 haptics](https://developer.apple.com/documentation/avfaudio/avaudiosession/setallowhapticsandsystemsoundsduringrecording%28_%3A%29).
+System vibration은 기존 `HapticManager`가 관리하며 Phase 5에서 변경하지 않았다.
+`AudioServicesPlayAlertSoundWithCompletion(kSystemSoundID_Vibrate)`를 3회 요청하고
+각 완료 후 다음 요청까지 200 ms를 둔다. burst 진행 중 새 요청은 버리고 완료 후 0.5초 cooldown,
+completion 2초 timeout 및 foreground 검사를 유지한다. 이미 OS에 요청된 진동은 취소할 수 없다.
+recording 중 `setAllowHapticsAndSystemSoundsDuringRecording(true)`와 같은 manager를 사용하는
+**Test Haptic**도 유지한다. 사용자 확인으로 실제 iPhone 진동과 capture 중 진동은 검증되었다.
 
 ## 실제 iPhone 네 대 테스트 순서
 
@@ -334,17 +333,185 @@ recording 중 기본 haptic 억제를 해제하기 위해 `setAllowHapticsAndSys
    1~3대만 켠 경우에도 앱/서버가 정상 응답하고 missing role을 표시해야 한다.
 9. 네 폰을 복구한 뒤 어느 한 폰에서 AI Buffer Ready → **Send Snapshot**을 한 번 누른다.
    기존 label/confidence와 AI Direction을 확인한다. 위험 class + known direction이면 해당 폰만 진동한다.
-   `normal` 결과 또는 unknown direction이면 진동이 없어야 한다. 자동 AI 전송은 없어야 한다.
+   `normal` 결과 또는 unknown direction이면 진동이 없어야 한다. Auto OFF에서는 자동 AI 전송이 없어야 한다.
 10. 느린 추론 중에도 다른 폰의 RMS/Direction/poll이 유지되는지 확인한다. 같은 command가 반복 진동하지 않는지,
     빠른 버튼 연타 시 pending/cooldown 제한이 적용되는지 확인한다.
 11. 역할 변경, Windows 서버 재시작, Wi-Fi 단절·복구, Stop/Start, 앱 background/foreground를 반복한다.
     이전 역할의 command나 늦은 응답이 현재 폰을 잘못 울리지 않아야 한다.
     네트워크 실패 중에도 microphone/RMS/AI buffer가 계속 동작해야 한다.
 
-Windows 자동 테스트 **29개**가 통과했다. fake clock으로 stale/margin/TTL/role conflict, command atomic consume,
+Phase 4 당시 Windows 자동 테스트 **29개**가 통과했다. fake clock으로 stale/margin/TTL/role conflict, command atomic consume,
 normal/danger 정책과 실제 HTTP 동시성을 확인한다. Phase 3 테스트도 함께 실행한다.
-실제 폰의 Core Haptics, recording 동시 동작, UI lifecycle, 네 기기 방향 정확도는 자동 테스트로 확인하지 못한다.
+Python 자동 테스트는 물리적인 진동, UI lifecycle, 네 기기 방향 정확도를 확인하지 못한다.
 
 이번 Windows 실제 모델 smoke test에서는 별도 기존 SavedModel과 가상 device 4개의 RMS를 연결했다.
 합성 무음 PCM의 실제 추론 두 번에서 direction RIGHT 및 RIGHT 전용 command를 확인했고,
 첫 추론 약 748 ms 동안에도 RMS 요청을 처리했다. 이 결과는 실제 phone의 RMS나 물리 haptic 검증이 아니다.
+
+## Phase 5: 중앙 Automatic Detection / Inference
+
+**implemented / device validation pending**. 서버 시작 시 Auto OFF, 재시작 시 이전 이벤트는 복구하지 않는다.
+한 이벤트에 source 한 대, PCM 한 개, model 호출 최대 한 번이다. 1대부터 자동 AI를 실행하며
+방향/진동 조건은 Phase 4의 네 role fresh + margin 조건과 분리한다.
+
+### 기존 AI 감사와 재사용
+
+- `decision/judge.py`: `THRESHOLD=0.4`, `DB_GATE=-50.0`(기존 코드에도 임시값 표기).
+  `normal`, 낮은 confidence, 낮은 입력 dBFS를 거부한다. 이를 복제하지 않고 `judge()`를 import한다.
+  `infer_auto()`는 `predict_array()`를 한 번만 호출하고 그 probabilities와 dBFS를 그대로 전달한다.
+  반환이 None인지로 `danger`를 정하며 기존 pattern/intensity는 iPhone에 보내지 않는다.
+- `decision/patterns.py`의 `GATING_MS=250`은 진동 패턴 길이 선택이다.
+  `model/threshold_search.py`는 offline N-of-M simulation/threshold 평가이며 중앙 실시간 event gate가 아니다.
+  따라서 multi-iPhone 이벤트 생성/cooldown은 새 `automatic.py`가 맡는다.
+- `main.process_array()`는 logger side effect가 있으므로 사용하지 않는다. classifier/모델/preprocessing/
+  calibration/load cache는 그대로 쓰고 `meit-ai`에는 파일을 쓰거나 소스/모델을 복사하지 않는다.
+- 수동 `/infer`는 기존 Phase 4 정책을 유지한다. 자동은 기존 judge가 허용한 위험음만 진동 대상이다.
+  UI의 label이 `siren`이어도 기존 confidence/dB gate에 걸리면 자동 진동은 없을 수 있다.
+
+### 설정과 이벤트 흐름
+
+```powershell
+$env:MEIT_AI_PATH = (Resolve-Path ..\meit-ai).Path
+.\.venv\Scripts\python.exe -B bridge\server.py --auto-trigger-dbfs -30 --auto-cooldown-ms 3000 --auto-audio-timeout-ms 3000 --auto-rearm-quiet-ms 750
+```
+
+| 설정 | 기본값 | 의미 |
+|---|---|---|
+| `--auto-trigger-dbfs` | -30 dBFS | source corrected RMS가 이 값 이상이면 trigger |
+| `--auto-cooldown-ms` | 3000 | 완료/실패 뒤 새 이벤트 차단, 2.5초 rolling window보다 길게 설정 |
+| `--auto-audio-timeout-ms` | 3000 | trigger부터 완전한 80000-byte upload를 수락할 때까지 |
+| `--auto-rearm-quiet-ms` | 750 | 모든 fresh RMS가 trigger보다 3 dB 낮은 값 미만인 상태를 관측할 기간 |
+
+위 RMS/time 값은 **Phase 5 experimental defaults**, Phase 6 실측 보정 대상이다.
+서버 수신 monotonic clock을 사용하며 폰 clock synchronization은 필요 없다.
+
+`IDLE → WAITING_FOR_AUDIO → INFERENCING → COOLDOWN → IDLE`.
+RMS 보고 시 fresh(기본 500 ms), registered, `ai_buffer_ready=true`인 기기 중
+corrected RMS 최대값을 source로 선택한다. 네 role/margin이 부족해도 trigger할 수 있다.
+등록 상태와 direction은 동일 registry snapshot에서 읽고, trigger 당시 각 role RMS/freshness/
+corrected RMS/winner/runner-up/margin/direction을 이벤트에 보관한다. 추론 이후 live 방향으로 교체하지 않는다.
+대상 registration이 바뀌거나 offline/conflict이면 기존 command 보호에 따라 진동을 보내지 않는다.
+
+지속 사이렌은 cooldown이 끝나도 quiet 재무장 전까지 재추론하지 않는다.
+quiet 관측 사이에 RMS freshness보다 긴 공백이 생기면 관측을 다시 시작하며, stale/offline을 quiet로 간주하지 않는다.
+따라서 noisy 환경에서는 IDLE + Waiting for quiet가 계속될 수 있다. Auto OFF/ON도 이 보호를 우회하지 않는다.
+RMS trigger는 위험음 확정 판정이 아니며, snapshot은 **명령 수신 당시 최신 2.5초**이다.
+소리 시작 직후에는 이전 배경음이 많이 포함될 수 있고, 중앙 gate가 물리적 사건을 완벽히 구별하는 것은 아니다.
+
+### HTTP / command 계약
+
+| Endpoint | 내용 |
+|---|---|
+| `GET /auto/status` | enabled/state/armed/config/active_event/last_event |
+| `POST /auto/start` | JSON `{}`, global Auto ON; 다음 RMS 보고부터 감지 |
+| `POST /auto/stop` | JSON `{}`, global Auto OFF; 자동 이벤트·미전달 자동 명령 무효화 |
+| `POST /event/audio` | 기존 80000-byte raw PCM과 아래 이벤트 metadata |
+
+기존 `POST /device/rms`에 optional boolean `ai_buffer_ready`를 추가했다.
+생략은 false이므로 이전 클라이언트의 Phase 4 RMS 동작은 유지하면서 자동 source에서는 제외한다.
+앱은 full buffer + capture 중 + 수동/자동 업로드 비점유일 때 true를 보고한다.
+
+명령 예시(UUID 문자열은 매번 runtime 생성):
+
+```json
+{
+  "command_id": "<command UUID>",
+  "kind": "infer_snapshot",
+  "event_id": "<event UUID>",
+  "role": "right",
+  "expires_in_ms": 2800
+}
+```
+
+`GET /device/command`의 기존 command/direction에 `auto` 상태를 더해 모든 폰이 결과를 볼 수 있다.
+기존 `kind=direction_haptic`은 유지하고 자동 진동에만 event_id/source=auto_inference를 붙인다.
+기기당 pending slot **하나**를 그대로 공유한다. 이미 다른 명령이 있으면 덮어쓰지 않고 이벤트를
+`command_unavailable`로 종료한 뒤 cooldown한다. 유실 시 재전송 대신 timeout으로 정리한다.
+
+자동 PCM은 `/infer`와 동일 Content-Type/Content-Length 및 네 X-Audio-* header에 다음을 추가한다.
+
+```text
+X-Event-ID: <event UUID>
+X-Device-ID: <selected device UUID>
+X-Device-Role: right
+```
+
+서버는 포맷/길이, active event, 선택된 device/role/registration, 만료 및 미수락 상태를 확인한 후
+`WAITING_FOR_AUDIO → INFERENCING`을 lock 안에서 원자적으로 변경한다. 그 뒤 기존 inference lock을
+기다리므로 동시 중복 업로드도 두 번째 모델 호출을 만들지 않는다. 중복/종료/late 요청은 409,
+잘못된 metadata는 400이며 AI를 실행하지 않는다. 이미 완료한 응답을 재전송하는 replay cache는 없다.
+이 의미는 **event당 at-most-once model call**이며 HTTP 전달 성공을 보장하는 exactly-once는 아니다.
+
+대기 3초 초과 시 `audio_timeout`을 기록하고 pending command를 비운 뒤 cooldown한다.
+HTTP 요청이 없어도 서버 service_actions(기본 최대 약 0.5초 tick 지연)가 timeout을 진행한다.
+모델 오류는 `inference_failed`로 정리하고 상세 private path/PCM을 응답·로그에 남기지 않는다.
+HTTP는 계속 병렬이고 자동·수동 모델 호출은 같은 lock으로 직렬화된다.
+
+Auto Stop은 미수락 이벤트를 종료하고, 이미 실행 중인 모델은 반환까지 한 슬롯을 유지하되
+결과/자동 진동을 무효화한다. 다시 ON해도 그 호출이 끝나기 전 새 auto event는 없다.
+TensorFlow가 반환하지 않는 상황은 강제 thread 종료하지 않는다. 이 경우 서버 재시작이 필요하다.
+이미 전달되어 재생 중인 OS 진동을 원격 취소하는 프로토콜은 없다. 수동 `/infer`는 Auto Stop/cooldown과 독립적이다.
+
+### iPhone lifecycle / bounded 상태
+
+- 기존 `makeAIInputSnapshot()`과 immutable PCM Data를 사용하며 Audio processor/format/session을 변경하지 않았다.
+  role·generation·foreground·capture·buffer·명령 유효 시간을 확인한다. 실패 시 mic을 멈추지 않는다.
+- 자동 upload task와 Auto ON/OFF task는 각각 최대 한 개다. upload는 polling/RMS loop를 막지 않는다.
+  각 기존 loop도 한 요청씩 await한다. command ID는 기존 최근 32개만 저장하고 실행 전에 기록한다.
+- 주소/role 변경, disconnect, inactive/background, capture Stop에서 auto snapshot task를 취소한다.
+  background 실행은 보장하지 않는다. 이미 서버가 수락한 추론은 로컬 upload 취소만으로 취소되지 않는다.
+  서버 전체 자동 이벤트를 중단하려면 **Stop Auto Detection**을 사용한다.
+- 서버는 active event 최대 1개 + 마지막 완료/실패 기록 1개만 보관한다. PCM은 이벤트 history에 저장하지 않는다.
+  기기 registry 최대 16개, pending 기기당 1개, event ID 누적 set/list 없음, 이벤트별 timer/thread 없음.
+  CLI HTTP 서버의 기존 thread-per-request 방식은 유지하며 공개 인터넷용 서버로 확장하지 않았다.
+
+### Phase 5 검증
+
+Windows 실행:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest discover -s bridge -p 'test_*.py' -v
+```
+
+기존 29개에 Phase 5 gate/HTTP/adapter 회귀 테스트를 추가했다. fake clock과 mock model로
+OFF/1-phone/4-phone/source eligibility/threshold/재무장/cooldown/중복/timeout/Stop/
+trigger-time direction/manual 보존/AI와 RMS·health·poll 동시성을 검증한다.
+**최종 Windows Python 테스트 54개(기존 29 + 신규 25)가 모두 통과했다.**
+전체 diff 및 `git diff --check`, Swift project reference 정적 검토, public 파일 민감정보 검사를 수행했다.
+
+실제 외부 SavedModel 별도 Windows HTTP smoke test(모델 mock 아님):
+메모리에서 만든 2.5초 교대 tone PCM → 가상 기기 RMS → 자동 event → infer_snapshot →
+`/event/audio` → 실제 `predict_array` / `judge` → 결과를 확인했다. 모델은 한 번 초기화하고 캐시를 재사용했다.
+
+| 가상 기기 | source | 실제 모델 결과 | direction | haptic command | 모델 시간 |
+|---|---|---|---|---|---|
+| 1대 | FRONT | siren, 97.99%, danger=true | UNKNOWN | 없음 | 약 333 ms |
+| 4대 | RIGHT | siren, 97.99%, danger=true | RIGHT | RIGHT 하나 | 약 26.6 ms |
+
+두 이벤트의 실제 모델 호출은 총 2회였고 각각 중복 upload는 409였다.
+이 결과는 합성 입력의 연결 검증이며 실제 사이렌 분류 정확도/마이크/물리 진동 검증이 아니다.
+
+**Single-iPhone validation**
+
+1. 기존 workflow_dispatch Actions로 새 IPA 빌드 → Sideloadly 설치. 새 Swift의 Xcode 컴파일은 이 단계에서 확인한다.
+2. bridge 실행 후 앱 foreground, FRONT, Test Connection → 등록 → Start Capture → AI Buffer Ready.
+3. Auto OFF에서 소리를 내어 자동 이벤트가 없고 수동 Send Snapshot/Test Haptic이 유지되는지 확인한다.
+4. Start Auto Detection 후 RMS가 trigger를 넘는 소리를 재생한다. Send Snapshot 없이 source FRONT,
+   label/confidence, Direction UNKNOWN이 나타나고 방향 진동은 없어야 한다.
+5. 지속음을 유지하면 반복 event가 생기지 않아야 한다. 조용해진 뒤 cooldown/재무장을 기다리고 다시 재생한다.
+6. Auto Stop, Stop/Start Capture, Wi-Fi 단절·복구, 서버 재시작, background/foreground를 확인한다.
+   mic/PCM은 기존처럼 동작하며 서버 재시작은 OFF, capture/background 중단은 늦은 snapshot을 취소해야 한다.
+7. 명령 후 폰이 snapshot을 보내지 못하면 약 3초 뒤 audio_timeout, 이후 quiet + cooldown 뒤 복구하는지 확인한다.
+
+**Four-iPhone validation**
+
+1. 서로 다른 네 role의 등록·capture·buffer-ready·fresh RMS를 먼저 확인하고 Auto ON.
+2. RIGHT 가까이서 소리를 내어 source가 가장 큰 corrected RMS 기기 한 대인지 확인한다.
+   label은 기존 모델 결과이며 known direction + judge 허용일 때만 RIGHT의 기존 system vibration 3회가 재생되어야 한다.
+3. 다른 세 방향도 반복한다. 두 최대 RMS의 차이가 margin 미만이거나 한 role이 stale/missing이면
+   자동 AI 결과는 유지하되 direction UNKNOWN, 방향 진동 없음이어야 한다.
+4. Auto/수동/Test Direction이 겹쳐도 command 중복 실행/무한 burst가 없어야 한다.
+   추론 중 RMS가 바뀌어도 Last Auto Event direction은 trigger 당시 값을 유지해야 한다.
+
+Phase 5 Xcode build / IPA / 실제 iPhone 자동 UI·snapshot·진동 연계는 **미검증**이다.
+실제 네 대 동시 방향 테스트는 기기 부족으로 별도 검증이 필요하다. 기존 system vibration 구현은 수정하지 않았다.

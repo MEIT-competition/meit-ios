@@ -76,6 +76,20 @@ final class NetworkManager: ObservableObject {
         try await request(path: path, body: body, query: query, coordination: true)
     }
 
+    // Caller owns one cancellable auto task; manual UI state remains independent.
+    func sendAutomaticSnapshot(_ snapshot: AIInputSnapshot, eventID: String,
+                               deviceID: String, role: DeviceRole) async throws {
+        guard snapshot.sampleRate == 16_000, snapshot.channels == 1,
+              snapshot.sampleCount == 40_000, snapshot.byteCount == 80_000,
+              snapshot.duration == 2.5 else {
+            throw NetworkFailure(message: "Snapshot must be 16000 Hz / mono / PCM16LE / 2.500 s.")
+        }
+        _ = try await request(path: "/event/audio", body: snapshot.pcm16LittleEndian,
+                              headers: ["X-Event-ID": eventID, "X-Device-ID": deviceID,
+                                        "X-Device-Role": role.rawValue])
+        // The central result is published to every phone through command polling.
+    }
+
     func testConnection() {
         run(sending: false) { [self] in
             let data = try await request(path: "/health")
@@ -182,7 +196,7 @@ final class NetworkManager: ObservableObject {
     }
 
     private func request(path: String, body: Data? = nil, query: [URLQueryItem] = [],
-                         coordination: Bool = false) async throws -> Data {
+                         coordination: Bool = false, headers: [String: String] = [:]) async throws -> Data {
         var request = URLRequest(url: try endpoint(path: path, query: query))
         request.timeoutInterval = coordination ? 1 : (body == nil ? 10 : 60)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -197,6 +211,7 @@ final class NetworkManager: ObservableObject {
                 request.setValue("40000", forHTTPHeaderField: "X-Audio-Samples")
             }
         }
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let transport = coordination ? coordinationSession : session
         let (data, response) = try await transport.data(for: request)
         try Task.checkCancellation()

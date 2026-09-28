@@ -1,8 +1,8 @@
 # MEIT iOS
 
-현재 단계: **Phase 4 - Multi-iPhone coordination / RMS-based direction / targeted iPhone haptics**.
+현재 단계: **Phase 5 - Automatic detection / inference**.
 
-Phase 4: **implemented / device validation pending**. 실제 iPhone 4대 검증 전이다.
+Phase 5: **implemented / device validation pending**. 자동 동작은 실제 iPhone 검증 전이다.
 
 | 단계 | 범위 | 검증 상태 |
 |---|---|---|
@@ -10,9 +10,10 @@ Phase 4: **implemented / device validation pending**. 실제 iPhone 4대 검증 
 | Phase 1 | iPhone microphone capture + RMS | 권한, 48,000 Hz / mono, RMS, Start/Stop 실기기 확인 |
 | Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 실기기 40000 samples / 80000 bytes / 2.500 s / snapshot 확인 |
 | Phase 3 | 한 iPhone의 수동 snapshot → Windows 기존 AI → 결과 표시 | 실제 Wi-Fi end-to-end inference 확인 |
-| Phase 4 | FRONT / RIGHT / BACK / LEFT, RMS 방향, 해당 iPhone haptic | 구현됨, 실제 4-phone 검증 필요 |
+| Phase 4 | FRONT / RIGHT / BACK / LEFT, RMS 방향, 해당 iPhone system vibration | 단일 실기기 진동·capture 중 진동 확인, 실제 4-phone 방향 검증 필요 |
+| Phase 5 | 중앙 RMS event → 한 iPhone snapshot → 기존 AI → targeted vibration | Windows 테스트·실제 모델 가상 기기 검증, 실제 iPhone 자동 동작 검증 필요 |
 
-Phase 0–3의 실제 기기 실행 결과는 사용자 확인에 근거한다.
+Phase 0–3 및 Phase 4 system vibration의 실제 기기 실행 결과는 사용자 확인에 근거한다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
@@ -20,7 +21,7 @@ Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예�
 현재 앱은 실제 입력의 RMS(dBFS)와 변환된 AI 입력 버퍼의 규격·준비 상태를 표시한다.
 Phase 3에서는 수동 HTTP snapshot 전송과 기존 meit-ai 결과 표시를 추가한다.
 Phase 4에서는 네 역할의 RMS 보고·방향 추정과 해당 iPhone 진동을 추가한다.
-자동 추론 루프, TDoA, 자동 audio 선택, 녹음 파일 저장은 구현하지 않는다.
+Phase 5에서는 bridge가 자동 이벤트와 단일 audio source를 선택한다. TDoA와 녹음 파일 저장은 구현하지 않는다.
 
 ## 프로젝트
 
@@ -51,6 +52,8 @@ meit-ios/
 │   ├── server.py
 │   ├── meit_ai_adapter.py
 │   ├── coordination.py
+│   ├── automatic.py
+│   ├── test_automatic.py
 │   ├── test_coordination.py
 │   ├── test_bridge.py
 │   └── README.md
@@ -244,7 +247,7 @@ Snapshot은 16 kHz mono PCM16LE, 40,000 samples / 80,000 bytes / 2.500 s이며 W
 
 Windows에서 단위 테스트와 합성 무음 snapshot의 실제 SavedModel HTTP 추론을 확인했다.
 이후 사용자가 실제 iPhone → Wi-Fi → Windows → 결과 표시까지 확인했다.
-이 기록은 Phase 3 검증이며, 이번 Phase 4 변경의 빌드·기기 검증과 구분한다.
+이 기록은 Phase 3 검증이며, Phase 5 자동 동작의 빌드·기기 검증과 구분한다.
 **실행 명령, HTTP 계약, 방화벽 및 기기 테스트는 [bridge/README.md](bridge/README.md)를 따른다.**
 기존 Audio 소스와 unsigned IPA workflow는 변경하지 않았다.
 
@@ -257,8 +260,9 @@ UserDefaults에 저장되며 실제 ID/IP를 소스에 넣지 않는다. Test Co
 
 - `DeviceCoordinator.swift`: 역할·ID, 약 100 ms RMS 보고, 약 200 ms command polling.
   각 루프는 한 요청을 await하므로 backlog를 만들지 않는다. 네트워크 실패는 capture를 멈추지 않는다.
-- `HapticManager.swift`: Test Haptic과 서버 명령에 동일한 Core Haptics 3-pulse 패턴을 사용한다.
-  engine 재사용, recording 중 haptic 허용, foreground 검사, 오류 표시를 포함한다.
+- `HapticManager.swift`: Test Haptic과 서버 명령에 동일한 system vibration 3회를 사용한다.
+  `AudioServicesPlayAlertSoundWithCompletion(kSystemSoundID_Vibrate)` 완료 후 200 ms 간격,
+  burst 중 중복 차단·cooldown·recording 중 진동 허용·foreground 검사·오류 표시를 유지한다.
 - `bridge/coordination.py`: 서버 수신 monotonic 시각, fresh RMS 500 ms, online timeout 5초,
   네 역할 모두 fresh일 때만 corrected RMS 최대값과 runner-up 차이로 방향을 결정한다.
   기본 margin은 3 dB이며 CLI로 조정 가능하다. calibration offset은 기기별 0 dB다.
@@ -267,12 +271,46 @@ UserDefaults에 저장되며 실제 ID/IP를 소스에 넣지 않는다. Test Co
   해당 기기에만 명령을 생성한다. 기기당 pending 1개, TTL 2초이며 polling에서 한 번 소비한다.
 
 부족한 역할, stale RMS, 역할 충돌, margin 부족은 UNKNOWN으로 표시한다.
-자동 AI inference, TDoA, class별 진동 패턴, background 보장, 자동 calibration은 포함하지 않는다.
+Phase 4 수동 기능은 그대로 유지한다. TDoA, class별 진동 패턴, background 보장, 자동 calibration은 포함하지 않는다.
 
 Windows 단위 테스트는 기존 Phase 3 동작과 registration/conflict/stale/margin/command/병렬 요청을
 검증한다. **실제 4-phone 검증 전이므로 Phase 4 완료로 표시하지 않는다.**
 설정값, HTTP 예제, 전달 손실·중복 방지 정책과 정확한 네 대 테스트 순서는
 [bridge/README.md](bridge/README.md)의 Phase 4 절을 따른다.
+
+## Phase 5 자동 감지 / 추론
+
+**implemented / device validation pending**. 서버 기본값은 Auto OFF이다.
+Test Connection → Start Capture → AI Buffer Ready → **Start Auto Detection** 순서로 사용한다.
+Auto는 모든 폰이 공유하는 bridge 설정이며 OFF여도 기존 수동 기능은 유지된다.
+
+- fresh + buffer-ready 기기 중 corrected RMS가 가장 큰 한 기기만 선택한다.
+  1~3대여도 자동 AI는 실행하고 direction UNKNOWN이면 방향 진동을 하지 않는다.
+- 중앙 상태: `IDLE → WAITING_FOR_AUDIO → INFERENCING → COOLDOWN → IDLE`.
+  기본 trigger -30 dBFS, 오디오 대기 3초, 완료 후 cooldown 3초이다.
+  다음 이벤트는 fresh RMS가 -33 dBFS 미만으로 750 ms 관측된 뒤에만 재무장한다.
+  모두 Phase 6 보정 전 실험 설정이며 상세 CLI는 bridge 문서에 있다.
+- 기존 `makeAIInputSnapshot()`과 16000 Hz / mono / PCM16LE / 40000 samples /
+  80000 bytes / 2.500 s 계약을 그대로 재사용한다. Audio 소스는 수정하지 않았다.
+- 자동 판정은 외부 `decision.judge()`의 기존 confidence 0.4 / 입력 dBFS -50 gate를 재사용한다.
+  알림 허용 + trigger 당시 known direction이면 기존 system vibration 명령 하나를 보낸다.
+  수동 `/infer`는 Phase 4의 기존 class 판정 동작을 유지한다.
+- Auto Stop은 신규 이벤트와 미전달 자동 명령을 차단한다. 실행 중 TensorFlow 호출은
+  강제 중단하지 않고 반환 결과/진동을 무효화한다. manual 요청은 독립적이다.
+- 주소·role 변경, 비활성화/background, capture 중단 시 자동 업로드 task를 취소한다.
+  서버 재시작은 Auto OFF, 현재 이벤트 초기화이며 폰은 기존 등록 재시도를 사용한다.
+
+**Single-iPhone validation**: FRONT 한 대로 위 순서를 실행하고 소리를 재생한다.
+Send Snapshot 없이 Source FRONT / label / confidence / Direction UNKNOWN이 표시되고
+진동은 없어야 한다. 조용해진 뒤 다시 소리를 내어 다음 이벤트를 확인한다.
+
+**Four-iPhone validation**: 네 role의 capture/RMS를 먼저 준비한 뒤 Auto를 켠다.
+한쪽 가까이에서 소리를 내어 loudest source 하나만 업로드하는지 확인한다.
+기존 AI가 알림을 허용하고 네 role이 fresh + 3 dB margin이면 해당 폰만 3회 진동해야 한다.
+
+Windows 테스트와 가상 기기를 사용한 실제 SavedModel 결과는
+[bridge/README.md](bridge/README.md)의 Phase 5 검증 절에 기록한다.
+새 Swift 코드의 Xcode 빌드·IPA 및 실제 iPhone 자동 동작은 아직 검증하지 않았다.
 
 ## GitHub Actions 빌드
 
@@ -364,7 +402,8 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 ## 검증 상태와 범위
 
 작성 환경은 **Windows이며 Xcode가 없다**. Phase 0–3의 실제 기기 검증은 사용자 확인으로
-완료했다. **이번 Phase 4의 Xcode 컴파일·Core Haptics·네 iPhone LAN 동작은 아직 검증하지 않았다.**
+완료했다. Phase 4 system vibration과 capture 중 진동도 사용자 확인으로 검증되었다.
+**Phase 5 변경의 Xcode 컴파일·IPA·실제 iPhone 자동 동작 및 실제 네 iPhone 동시 방향은 아직 검증하지 않았다.**
 Windows bridge의 기존·신규 단위 테스트 및 정적 검토를 수행한다. 가상 device/합성 PCM으로
 실행한 검증은 실제 microphone 감도·방향 정확도·물리적인 진동을 확인한 것이 아니다.
 기존 unsigned workflow로 빌드한 뒤 bridge 문서의 네 iPhone 테스트를 수행해야 한다.
