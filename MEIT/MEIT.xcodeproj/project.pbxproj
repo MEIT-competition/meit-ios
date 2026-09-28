@@ -6,11 +6,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000003 /* AudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* AudioCaptureManager.swift */; };
 		A10000000000000000000001 /* MEITApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MEITApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A20000000000000000000004 /* AudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000001 /* MEITApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MEITApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* MEIT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MEIT.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -39,6 +41,7 @@
 			children = (
 				A20000000000000000000001 /* MEITApp.swift */,
 				A20000000000000000000002 /* ContentView.swift */,
+				A40000000000000000000004 /* Audio */,
 			);
 			path = MEIT;
 			sourceTree = "<group>";
@@ -47,6 +50,12 @@
 			isa = PBXGroup;
 			children = (A20000000000000000000003 /* MEIT.app */,);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Audio */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000004 /* AudioCaptureManager.swift */,);
+			path = Audio;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -108,6 +117,7 @@
 			files = (
 				A10000000000000000000001 /* MEITApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
+				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -148,6 +158,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -169,6 +180,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

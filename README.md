@@ -1,11 +1,15 @@
 # MEIT iOS
 
-현재 단계: **Phase 0 - iOS build pipeline validation**.
+현재 단계: **Phase 1 - Microphone capture and real-time RMS (dBFS)**.
+
+Phase 0 - iOS build pipeline validation: GitHub Actions 빌드와 unsigned IPA 생성,
+Sideloadly를 통한 실제 iPhone 설치·앱 실행을 사용자 확인으로 완료했다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
 Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예정이다.
-현재 앱은 **MEIT iOS** 텍스트만 표시하며, 오디오·햅틱·통신·모델 기능은 구현하지 않는다.
+현재 앱은 마이크 권한을 요청하고, 실제 입력의 RMS(dBFS)를 실시간 표시한다.
+네트워크/Wi-Fi, meit-ai 연결, 여러 기기 연결, 방향 추정, 햅틱, 녹음 파일 저장은 구현하지 않는다.
 
 ## 프로젝트
 
@@ -22,15 +26,79 @@ meit-ios/
 │   │   └── xcshareddata/xcschemes/MEIT.xcscheme
 │   └── MEIT/
 │       ├── MEITApp.swift
-│       └── ContentView.swift
+│       ├── ContentView.swift
+│       └── Audio/AudioCaptureManager.swift
 ├── .github/workflows/ios-build.yml
 ├── .gitignore
 └── README.md
 ```
 
-`MEITApp.swift`는 앱 진입점, `ContentView.swift`는 화면이다.
+`MEITApp.swift`는 앱 진입점, `ContentView.swift`는 상태·버튼·오류를 표시하는 화면이다.
+`Audio/AudioCaptureManager.swift`는 권한·오디오 세션·엔진·RMS와 캡처 수명주기를 관리한다.
 `project.pbxproj`는 타깃·소스·빌드 설정을 정의하고, 공유 `MEIT.xcscheme`은 CI에서
 같은 scheme을 찾도록 한다. `.gitignore`는 빌드 산출물과 Xcode 개인 설정을 제외한다.
+
+## Phase 1 마이크 입력
+
+- `@MainActor ObservableObject`가 `isCapturing`, `isStarting`, `rmsDBFS`,
+  `microphonePermission`, `errorMessage` 및 입력 형식 표시를 관리한다.
+- Start를 누르면 iOS 17의 `AVAudioApplication.requestRecordPermission()`으로 권한을 요청한다.
+  `notDetermined` / `granted` / `denied`를 구분하며, 거부 시 Settings에서 허용하도록 안내한다.
+  Debug/Release 모두 자동 생성 Info.plist에 `NSMicrophoneUsageDescription`을 포함한다:
+  **MEIT uses the microphone to detect environmental sounds.**
+- `AVAudioSession`은 `.record`, `.measurement`, 옵션 없음으로 설정 후 활성화한다.
+  세션 활성화·엔진 시작·세션 비활성화 실패는 화면의 Error에 표시한다.
+- 매 Start마다 새 `AVAudioEngine`을 만들고 input node의 `outputFormat(forBus: 0)`을
+  그대로 tap에 사용한다. sample rate와 채널 수가 유효한 Float32 입력인지 먼저 확인한다.
+  44.1/48 kHz를 강제하거나 16 kHz로 바꾸지 않는다. 화면에 실제 Hz와 채널 수를 표시한다.
+- tap에서 모든 채널의 유효 `frameLength`를 `stride`에 맞춰 읽고 Double로 제곱합을 구한다.
+  약 0.1초 분량의 sample power를 평균하여 `RMS = sqrt(mean(sample²))`,
+  `dBFS = 20 * log10(RMS)`를 계산한다. 채널을 합쳐 위상이 상쇄되는 방식은 사용하지 않는다.
+  비유한 sample은 0으로 취급하며 결과를 -100…0 dBFS로 제한한다.
+  첫 측정은 바로 표시하고 이후 UI 값에는 계수 0.25의 지수 평활을 적용한다.
+  이 값은 디지털 입력 레벨이며 보정된 음압(dB SPL)이 아니다.
+- tap 콜백은 MainActor 밖의 factory에서 만들어 UI actor 격리를 상속하지 않는다.
+  tap 전용 계산 객체는 tap 설치 시 한 번 생성하고 콜백만 접근한다.
+  콜백에서 파일·네트워크 I/O, PCM 배열 생성/복사, UI 수정, 동기 대기를 하지 않는다.
+  약 10 Hz로 scalar 결과만 main queue에 비동기 전달하며 모든 공개 상태와 engine 제어는
+  MainActor에서 직렬 처리한다. 전달용 작은 closure 외에 매 buffer 할당을 만들지 않는다.
+- Start 중이거나 캡처 중이면 중복 Start를 무시한다. Stop은 먼저 캡처 ID를 무효화하고,
+  engine을 멈춘 뒤 설치된 tap만 제거하고 engine을 해제한다. RMS는 -100으로 초기화한다.
+  이전 권한 요청의 완료나 늦게 도착한 측정값은 새 캡처를 시작하거나 덮어쓸 수 없다.
+- 백그라운드 진입·화면 이탈 시 Stop한다. interruption 또는 engine 입력 구성 변경,
+  media services reset도 캡처를 정리하고 재시작 안내를 표시한다. 자동 재시작이나
+  background audio capability는 추가하지 않는다. 권한 팝업의 일시적인 inactive 상태는
+  background로 취급하지 않는다.
+
+Phase 2의 native PCM 처리 지점은 tap 안의 `NativeRMSMeter.consume(_:)` 호출부다.
+권한, session, hardware format, tap 수명주기는 재사용할 수 있다. 추후 resampling → mono →
+signed PCM16 → 2.5초 버퍼를 별도 처리기로 추가한다. 현재 변환·전송·PCM 보관은 없다.
+콜백 밖에서 PCM을 사용할 때는 버퍼가 재사용되므로 사전 할당 저장소 등 별도 소유권 설계가 필요하다.
+
+[Apple 권한 API](https://developer.apple.com/documentation/avfaudio/avaudioapplication/requestrecordpermission(completionhandler:)),
+[measurement 모드](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/measurement),
+[Float32 채널 데이터와 stride](https://developer.apple.com/documentation/avfaudio/avaudiopcmbuffer/floatchanneldata)
+
+## Phase 1 실제 iPhone 테스트
+
+1. 기존 workflow를 수동 실행한다. 빌드 로그에서 `AudioCaptureManager.swift`가 컴파일되고,
+   `Package unsigned IPA`와 업로드가 성공하는지 확인한다. artifact 내부 앱의 Info.plist에
+   위 `NSMicrophoneUsageDescription` 문구가 포함되는지도 확인한다.
+2. IPA를 Sideloadly로 서명·설치한다. 첫 권한 요청을 검증할 때는 iOS 권한이 미결정인
+   설치 상태를 사용한다. 기존 허용/거부가 유지되어 팝업이 안 뜨는 것은 정상이다.
+3. 앱에서 Start Capture를 누르고 권한을 허용한다. `granted` / `Capturing`, 실제 Hz/채널 수,
+   변화하는 유한 dBFS가 표시되는지 확인한다. 조용한 환경보다 말하기·박수에서 값이 증가해야 한다.
+   실제 방의 배경 소음은 0이 아니므로 조용하다고 반드시 -100 dBFS가 되지는 않는다.
+4. Stop을 누르면 `Ready`, -100 dBFS가 되고 측정 갱신이 멈추는지 확인한다.
+   Start → Stop을 10회 이상 반복하고 빠르게 눌러도 중복 tap 오류나 crash가 없는지 확인한다.
+5. 권한을 거부한 상태에서는 `denied` / `Permission Denied`와 안내가 표시되고 앱이 유지되어야 한다.
+   Settings에서 허용하고 앱으로 돌아와 다시 Start하면 캡처가 시작되어야 한다.
+6. 캡처 중 홈 화면 이동·화면 잠금 후 돌아오면 자동 재시작 없이 정지 상태여야 한다.
+   권한 요청 중 백그라운드로 이동한 경우에도 늦은 허용 응답만으로 캡처가 시작되지 않아야 한다.
+7. 전화/Siri 등의 오디오 interruption 또는 입력 변경 후 정지 상태·안내를 확인하고,
+   방해 상황이 끝난 뒤 Start로 다시 캡처 가능한지 확인한다.
+8. 가능하면 iPhone 15/16 각각에서 몇 분간 실행한다. 입력이 44.1 kHz 또는 48 kHz일 때 모두
+   올바르게 갱신되는지 확인한다. 이번 앱에는 sample rate를 강제하는 기능이 없다.
 
 ## GitHub Actions 빌드
 
@@ -121,10 +189,10 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 
 ## 검증 상태와 범위
 
-작성 환경은 **Windows이며 Xcode가 없다**. 로컬 Xcode 빌드 성공을 의미하지 않는다.
-첫 GitHub Actions 실행에서 프로젝트 로딩, Swift 컴파일·링크, 자동 Info.plist 생성,
-서명 없는 앱 생성, IPA 패키징 및 artifact 업로드를 실제 검증해야 한다.
-실제 iPhone 15/16에서의 실행과 Sideloadly 서명·설치도 아직 검증하지 않았다.
+작성 환경은 **Windows이며 Xcode가 없다**. Phase 0 빌드와 실제 기기 실행은 사용자 확인으로
+완료했으나, **Phase 1 변경은 아직 macOS/Xcode 컴파일 및 실제 마이크 동작을 검증하지 않았다**.
+기존 unsigned workflow는 변경하지 않았다. 위 Actions 및 iPhone 테스트로 권한 설명 생성,
+Swift 컴파일·링크, IPA 패키징, 권한·RMS·반복 Start/Stop을 검증해야 한다.
 
 runner 이미지와 기본 Xcode는 갱신될 수 있다. 각 실행의 **Set up job**과
 **Inspect Xcode and iOS SDK** 로그를 기준으로 빌드 환경을 확인한다.
