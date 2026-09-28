@@ -1,27 +1,31 @@
 # MEIT iOS
 
-현재 단계: **Phase 2 - Native PCM → 16 kHz mono PCM16 / 2.5-second rolling AI input buffer**.
+현재 단계: **Phase 3 - iPhone PCM snapshot → HTTP → Windows → existing meit-ai inference → result**.
+
+Phase 3은 구현되었으며 실제 iPhone end-to-end 검증이 필요하다.
 
 | 단계 | 범위 | 검증 상태 |
 |---|---|---|
 | Phase 0 | GitHub Actions unsigned IPA build | 실제 빌드·Sideloadly 설치·앱 실행 확인 |
 | Phase 1 | iPhone microphone capture + RMS | 권한, 48,000 Hz / mono, RMS, Start/Stop 실기기 확인 |
-| Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 구현 완료, Actions·실기기 검증 전 |
+| Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 실기기 40000 samples / 80000 bytes / 2.500 s / snapshot 확인 |
+| Phase 3 | 한 iPhone의 수동 snapshot → Windows 기존 AI → 결과 표시 | Windows bridge 테스트·실제 모델 loopback 확인, Actions·실기기 검증 필요 |
 
-Phase 0/1의 실제 실행 결과는 사용자 확인에 근거한다.
+Phase 0–2의 실제 기기 실행 결과는 사용자 확인에 근거한다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
 Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예정이다.
 현재 앱은 실제 입력의 RMS(dBFS)와 변환된 AI 입력 버퍼의 규격·준비 상태를 표시한다.
-네트워크/Wi-Fi, meit-ai 연결, 여러 기기 연결, 방향 추정, 햅틱, 녹음 파일 저장은 구현하지 않는다.
+Phase 3에서는 수동 HTTP snapshot 전송과 기존 meit-ai 결과 표시를 추가한다.
+여러 기기 연결, 자동 추론 루프, 방향 추정, 햅틱, 녹음 파일 저장은 구현하지 않는다.
 
 ## 프로젝트
 
 - SwiftUI, iPhone 전용, deployment target **iOS 17.0** 이상: iPhone 15/16 대상.
 - Bundle identifier: `org.meit.ios`. 버전: `0.1.0` (build `1`).
 - 앱의 third-party dependency 및 패키지 설치 단계 없음.
-- Info.plist는 Xcode가 build settings에서 생성한다. 아이콘은 이 단계에 포함하지 않는다.
+- Info.plist는 Xcode가 build settings와 로컬 네트워크용 `MEIT/MEIT/Info.plist`를 합쳐 생성한다. 아이콘은 이 단계에 포함하지 않는다.
 
 ```text
 meit-ios/
@@ -32,10 +36,17 @@ meit-ios/
 │   └── MEIT/
 │       ├── MEITApp.swift
 │       ├── ContentView.swift
+│       ├── Info.plist
+│       ├── Network/NetworkManager.swift
 │       └── Audio/
 │           ├── AudioCaptureManager.swift
 │           ├── AIInputProcessor.swift
 │           └── AIInputBuffer.swift
+├── bridge/
+│   ├── server.py
+│   ├── meit_ai_adapter.py
+│   ├── test_bridge.py
+│   └── README.md
 ├── .github/workflows/ios-build.yml
 ├── .gitignore
 └── README.md
@@ -212,6 +223,23 @@ interruption / configuration change / background 처리도 같은 Stop 경로를
 현재 UI 검사는 길이·지속 갱신을 확인하는 절차다. 파형 보존, resampling 품질, ring wrap 시 정확한
 sample 순서와 endian 해석의 자동화된 수치 검증은 아직 수행하지 않았다.
 
+## Phase 3 수동 AI 연결
+
+`Network/NetworkManager.swift`가 기존 snapshot API와 URLSession을 연결한다.
+사용자가 Windows 사설 IPv4를 입력하고 Test Connection / Send Snapshot을 누른 경우만 요청한다.
+Snapshot은 16 kHz mono PCM16LE, 40,000 samples / 80,000 bytes / 2.500 s이며 WAV header를 붙이지 않는다.
+전송 중 중복 작업을 막고 취소·timeout·연결 실패·잘못된 응답을 화면에 표시한다.
+
+`bridge/server.py`는 표준 라이브러리 직렬 HTTP 서버로 payload를 검사한다.
+`bridge/meit_ai_adapter.py`는 별도 기존 meit-ai의 `classifier.adapter.predict_array()`를 호출한다.
+모델은 시작 때 한 번 load하고 기존 preprocessing/calibration과 캐시를 재사용한다.
+모델 소스·weights·dataset은 이 public repository로 복사하지 않는다.
+
+Windows에서 단위 테스트와 합성 무음 snapshot의 실제 SavedModel HTTP 추론을 확인했다.
+실제 iPhone → Wi-Fi → Windows → 결과 표시와 이번 Swift 변경의 Actions 빌드는 아직 확인하지 않았다.
+**실행 명령, HTTP 계약, 방화벽 및 기기 테스트는 [bridge/README.md](bridge/README.md)를 따른다.**
+기존 Audio 소스와 unsigned IPA workflow는 변경하지 않았다.
+
 ## GitHub Actions 빌드
 
 Workflow 이름은 **Build unsigned iOS IPA**이며 `workflow_dispatch`로만 실행한다.
@@ -301,11 +329,11 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 
 ## 검증 상태와 범위
 
-작성 환경은 **Windows이며 Xcode가 없다**. Phase 0/1의 실제 기기 검증은 사용자 확인으로
-완료했으나, **Phase 2는 아직 macOS/Xcode 컴파일·converter 실행·실기기 검증 전**이다.
-Windows에서는 프로젝트/소스 참조, 기존 설정·workflow 유지, 규격과 수명주기 코드의 정적 검토만
-수행한다. 실제 Swift 컴파일 성공이나 converter의 수치 정확성을 확인했다고 간주하지 않는다.
-기존 unsigned workflow로 빌드한 뒤 위 Phase 1/2 기기 테스트를 수행해야 한다.
+작성 환경은 **Windows이며 Xcode가 없다**. Phase 0–2의 실제 기기 검증은 사용자 확인으로
+완료했다. **이번 Phase 3 Swift 변경의 macOS/Xcode 컴파일·실제 LAN 기기 검증은 아직 수행하지 않았다.**
+Windows에서는 bridge 단위 테스트, 기존 SavedModel의 실제 loopback HTTP 추론, 프로젝트·plist·소스
+정적 검토를 수행했다. 합성 무음 입력의 모델 실행을 iPhone 녹음 분류 정확도 검증으로 간주하지 않는다.
+기존 unsigned workflow로 빌드한 뒤 bridge 문서의 iPhone 테스트를 수행해야 한다.
 
 runner 이미지와 기본 Xcode는 갱신될 수 있다. 각 실행의 **Set up job**과
 **Inspect Xcode and iOS SDK** 로그를 기준으로 빌드 환경을 확인한다.

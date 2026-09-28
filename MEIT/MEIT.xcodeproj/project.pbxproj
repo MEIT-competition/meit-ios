@@ -6,6 +6,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000006 /* NetworkManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* NetworkManager.swift */; };
 		A10000000000000000000005 /* AIInputProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AIInputProcessor.swift */; };
 		A10000000000000000000004 /* AIInputBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AIInputBuffer.swift */; };
 		A10000000000000000000003 /* AudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* AudioCaptureManager.swift */; };
@@ -14,6 +15,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A20000000000000000000007 /* NetworkManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000006 /* AIInputProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInputProcessor.swift; sourceTree = "<group>"; };
 		A20000000000000000000005 /* AIInputBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInputBuffer.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* AudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureManager.swift; sourceTree = "<group>"; };
@@ -46,6 +49,8 @@
 				A20000000000000000000001 /* MEITApp.swift */,
 				A20000000000000000000002 /* ContentView.swift */,
 				A40000000000000000000004 /* Audio */,
+				A40000000000000000000005 /* Network */,
+				A20000000000000000000008 /* Info.plist */,
 			);
 			path = MEIT;
 			sourceTree = "<group>";
@@ -64,6 +69,12 @@
 				A20000000000000000000006 /* AIInputProcessor.swift */,
 			);
 			path = Audio;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Network */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000007 /* NetworkManager.swift */,);
+			path = Network;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -128,6 +139,7 @@
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,
 				A10000000000000000000004 /* AIInputBuffer.swift in Sources */,
+				A10000000000000000000006 /* NetworkManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -166,6 +178,7 @@
 			buildSettings = {
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MEIT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";
@@ -188,6 +201,7 @@
 			buildSettings = {
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MEIT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";

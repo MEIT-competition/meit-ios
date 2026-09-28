@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct ContentView: View {
     @StateObject private var audio = AudioCaptureManager()
+    @StateObject private var network = NetworkManager()
     @Environment(\.scenePhase) private var scenePhase
     @State private var snapshotInfo: String?
     @State private var checkingSnapshot = false
@@ -56,7 +57,7 @@ struct ContentView: View {
                             checkingSnapshot = false
                         }
                     }
-                    .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot)
+                    .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
                     if let snapshotInfo {
                         Text("Snapshot: \(snapshotInfo)")
                             .font(.caption)
@@ -71,6 +72,7 @@ struct ContentView: View {
                 .disabled(audio.isCapturing || audio.isStarting)
 
                 Button("Stop Capture") {
+                    network.cancel()
                     audio.stopCapture()
                 }
                 .buttonStyle(.bordered)
@@ -81,17 +83,62 @@ struct ContentView: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
                 }
+                Divider()
+                serverControls
             }
             .padding()
         }
         .onAppear { audio.refreshPermission() }
-        .onDisappear { audio.stopCapture() }
-        .onChange(of: audio.isCapturing) { _, _ in snapshotInfo = nil }
+        .onDisappear {
+            audio.stopCapture()
+            network.cancel()
+        }
+        .onChange(of: audio.isCapturing) { _, capturing in
+            snapshotInfo = nil
+            if !capturing { network.cancel() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 audio.stopCapture()
+                network.cancel()
             } else if phase == .active {
                 audio.refreshPermission()
+            }
+        }
+    }
+
+    private var serverControls: some View {
+        VStack(spacing: 12) {
+            Text("AI Server").font(.headline)
+            HStack {
+                TextField("Windows private IPv4", text: $network.serverAddress)
+                    .keyboardType(.decimalPad)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(network.isBusy)
+                Text(": 8765")
+            }
+            Text("Connection: \(network.connectionStatus)")
+            Button("Test Connection") { network.testConnection() }
+                .disabled(network.isBusy)
+            Button("Send Snapshot") { network.sendSnapshot(from: audio) }
+                .buttonStyle(.borderedProminent)
+                .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
+            if network.isBusy {
+                ProgressView(network.isSending ? "Sending..." : "Testing Connection...")
+                Button("Cancel Request") { network.cancel() }
+            }
+            if let result = network.result {
+                Text("AI Result").font(.headline)
+                Text("Label: \(result.label)")
+                Text(String(format: "Confidence: %.1f%%", result.confidence * 100))
+                Text(String(format: "Inference: %.1f ms", result.inferenceMilliseconds))
+            }
+            if let error = network.errorMessage {
+                Text("Network Error: \(error)")
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
             }
         }
     }

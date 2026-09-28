@@ -66,3 +66,25 @@ fastlane/test_output
 build/
 DerivedData/
 *.xcuserstate
+
+# Local Python / bridge configuration
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+bridge/local-config.*
+
+# External AI source, model weights and datasets must stay outside this public repo
+/meit-ai/
+/bridge/models/
+/bridge/data/
+saved_model/
+*.keras
+*.h5
+*.onnx
+*.tflite
+*.pt
+*.pth
+*.npy
+*.npz
