@@ -1,0 +1,93 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and package MEIT
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Inspect Xcode and iOS SDK
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app
+          xcode-select --print-path
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcrun --sdk iphoneos --show-sdk-version
+          plutil -lint MEIT/MEIT.xcodeproj/project.pbxproj
+          xcodebuild -list -project MEIT/MEIT.xcodeproj
+
+      - name: Build unsigned iOS app
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild \
+            -project MEIT/MEIT.xcodeproj \
+            -scheme MEIT \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/build/DerivedData" \
+            -resultBundlePath "$PWD/build/MEIT.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          app_path="$PWD/build/DerivedData/Build/Products/Release-iphoneos/MEIT.app"
+          test -d "$app_path"
+          test -f "$app_path/Info.plist"
+          test -x "$app_path/MEIT"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app_path/Info.plist"
+          xcrun lipo -verify_arch arm64 "$app_path/MEIT"
+          test ! -e "$app_path/_CodeSignature"
+          test ! -e "$app_path/embedded.mobileprovision"
+          if codesign -dv "$app_path" 2>/dev/null; then
+            echo "::error::Expected an unsigned app, but found a code signature."
+            exit 1
+          fi
+          mkdir -p build/package/Payload
+          ditto "$app_path" build/package/Payload/MEIT.app
+          cd build/package
+          zip -qry ../MEIT-unsigned.ipa Payload
+          unzip -t ../MEIT-unsigned.ipa
+          unzip -l ../MEIT-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEIT-unsigned.ipa
+          path: build/MEIT-unsigned.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEIT-build-diagnostics
+          path: |
+            build/xcodebuild.log
+            build/MEIT.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
