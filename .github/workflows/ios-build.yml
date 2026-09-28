@@ -58,7 +58,7 @@ jobs:
           test -x "$app_path/MEIT"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app_path/Info.plist"
-          xcrun lipo -verify_arch arm64 "$app_path/MEIT"
+          xcrun lipo "$app_path/MEIT" -verify_arch arm64
           test ! -e "$app_path/_CodeSignature"
           test ! -e "$app_path/embedded.mobileprovision"
           if codesign -dv "$app_path" 2>/dev/null; then
