@@ -90,33 +90,34 @@ struct FallbackDetailsView: View {
                     Text("meit ios")
                         .font(.headline.weight(.bold))
                         .accessibilityAddTraits(.isHeader)
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(language.text("settings.aboutDescription"))
-                            .font(.body)
-                            .lineSpacing(4)
-                        Text(language.text("hardware.pending"))
-                            .font(.subheadline)
-                    }
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(Color(uiColor: .tertiarySystemGroupedBackground),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Text(language.text("settings.aboutDescription"))
+                        .font(.body)
+                        .lineSpacing(4)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color(uiColor: .tertiarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Text(language.text("hardware.pending"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // Keep copyright in the row's measured flow, after all About content.
+                    Text(language.text("settings.copyright"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+                        .padding(.bottom, 24)
                 }
                 .padding(.vertical, 8)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(language.text("settings.about"))
             } header: {
                 Text(language.text("settings.about"))
-            } footer: {
-                Text(language.text("settings.copyright"))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 12)
-                    .textCase(nil)
             }
         }
     }

@@ -1,7 +1,7 @@
 /* User-facing text. Technical diagnostics and raw server errors remain verbatim. */
 "mode.selector" = "운용 모드";
 "mode.hardware" = "하드웨어";
-"mode.fallback" = "아이폰 대체";
+"mode.fallback" = "iPhone 모드";
 "main.listening.title" = "감지 중";
 "main.idle.title" = "대기 중";
 "main.starting.title" = "시작 중…";
@@ -65,8 +65,8 @@
 "settings.serverHelp" = "동일한 Wi-Fi 네트워크에 있는 Windows bridge 주소를 입력하세요.";
 "settings.device" = "기기";
 "settings.about" = "앱 정보";
-"settings.aboutDescription" = "위험음을 감지하고 방향 정보를 전달하는 보조 앱입니다. 실시간 오디오 입력, 자동 분석, 다중 기기 기반 방향 감지를 지원합니다.";
-"settings.copyright" = "copyright © meit ios. all rights reserved.";
+"settings.aboutDescription" = "위험음을 실시간으로 감지하고 주변 위험의 방향을 직관적으로 전달하기 위한 보조 앱입니다. 실시간 오디오 입력과 자동 분석, 다중 기기 기반 방향 감지를 지원합니다.";
+"settings.copyright" = "© 2026 jihyepark · meit. all rights reserved.";
 "common.done" = "완료";
 "diagnostics.title" = "진단 정보";
 "diagnostics.audio" = "오디오 및 AI 버퍼";
@@ -89,5 +89,5 @@
 "developer.cancel" = "요청 취소";
 "developer.lastRequest" = "최근 수동 요청";
 "hardware.wearable" = "웨어러블";
-"hardware.pending" = "하드웨어 연동은 아직 지원되지 않습니다.";
+"hardware.pending" = "하드웨어 연동은 현재 준비 중입니다.";
 "hardware.description" = "하드웨어 모드에서는 아이폰으로 소리를 수음하거나 진동을 출력하지 않습니다.";

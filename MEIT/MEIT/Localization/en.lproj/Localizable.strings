@@ -1,7 +1,7 @@
 /* User-facing text. Technical diagnostics and raw server errors remain verbatim. */
 "mode.selector" = "operating mode";
 "mode.hardware" = "hardware";
-"mode.fallback" = "iphone fallback";
+"mode.fallback" = "iPhone mode";
 "main.listening.title" = "listening";
 "main.idle.title" = "not listening";
 "main.starting.title" = "starting…";
@@ -65,8 +65,8 @@
 "settings.serverHelp" = "Use the Windows bridge address on the same Wi-Fi network.";
 "settings.device" = "device";
 "settings.about" = "about";
-"settings.aboutDescription" = "A companion app for detecting danger sounds and providing directional awareness. It supports live audio monitoring, automatic analysis, and multi-device direction sensing.";
-"settings.copyright" = "copyright © meit ios. all rights reserved.";
+"settings.aboutDescription" = "A companion app designed to detect danger sounds in real time and provide intuitive directional awareness. It supports live audio monitoring, automatic analysis, and multi-device direction sensing.";
+"settings.copyright" = "© 2026 jihyepark · meit. all rights reserved.";
 "common.done" = "done";
 "diagnostics.title" = "diagnostics";
 "diagnostics.audio" = "microphone & AI buffer";
@@ -89,5 +89,5 @@
 "developer.cancel" = "cancel request";
 "developer.lastRequest" = "Last manual request";
 "hardware.wearable" = "wearable";
-"hardware.pending" = "Hardware integration is not available yet.";
+"hardware.pending" = "Hardware integration is currently in development.";
 "hardware.description" = "Your iPhone does not listen or vibrate in hardware mode.";
