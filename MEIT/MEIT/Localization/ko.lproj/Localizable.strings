@@ -151,7 +151,7 @@
 "wearable.advancedDiagnostics" = "고급 진단 정보";
 
 /* Wearable runtime stereo configuration (advanced diagnostics only). */
-"wearable.dataSourceCatalog" = "내장 데이터 소스 · 스테레오 요청 전";
+"wearable.dataSourceCatalog" = "AVAudioSession 데이터 소스";
 "wearable.noDataSourceSnapshot" = "데이터 소스 정보가 없습니다. 수음을 시작해 기기의 정보를 확인하세요.";
 "wearable.sourceLocation" = "위치";
 "wearable.sourceOrientation" = "방향";
@@ -181,3 +181,12 @@
 "wearable.captureProbe.inputUnavailable" = "사용 가능한 AVCapture 마이크 장치가 없습니다.";
 "wearable.captureProbe.failed" = "조회용 입력을 생성하지 못해 지원 여부를 확인하지 않았습니다.";
 "wearable.captureProbe.complete" = "조회 완료 · 입력만 확인";
+
+/* Actual Wearable AVCapture PCM (separate from the read-only input probe). */
+"wearable.avcapture.noInputNode" = "사용하지 않음 · AVCapture backend";
+"wearable.avcapture.activeMode" = "실행 중인 웨어러블 캡처 모드";
+"wearable.avcapture.sampleRate" = "실제 PCM sample rate";
+"wearable.avcapture.pcmFormat" = "실제 PCM 형식 / flags / bits";
+"wearable.avcapture.interleaving" = "실제 PCM 채널 배치";
+"wearable.avcapture.interleaved" = "인터리브";
+"wearable.avcapture.planar" = "비인터리브";

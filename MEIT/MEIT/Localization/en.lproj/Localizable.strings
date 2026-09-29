@@ -151,7 +151,7 @@
 "wearable.advancedDiagnostics" = "Advanced diagnostics";
 
 /* Wearable runtime stereo configuration (advanced diagnostics only). */
-"wearable.dataSourceCatalog" = "Built-in data sources · before stereo request";
+"wearable.dataSourceCatalog" = "AVAudioSession data sources";
 "wearable.noDataSourceSnapshot" = "No data source snapshot is available. Start capture to inspect this device.";
 "wearable.sourceLocation" = "Location";
 "wearable.sourceOrientation" = "Orientation";
@@ -181,3 +181,12 @@
 "wearable.captureProbe.inputUnavailable" = "No AVCapture microphone device is available.";
 "wearable.captureProbe.failed" = "Could not create the probe input. Capability was not checked.";
 "wearable.captureProbe.complete" = "Checked · input only";
+
+/* Actual Wearable AVCapture PCM (separate from the read-only input probe). */
+"wearable.avcapture.noInputNode" = "Not used · AVCapture backend";
+"wearable.avcapture.activeMode" = "Active wearable capture mode";
+"wearable.avcapture.sampleRate" = "Actual PCM sample rate";
+"wearable.avcapture.pcmFormat" = "Actual PCM format / flags / bits";
+"wearable.avcapture.interleaving" = "Actual PCM interleaving";
+"wearable.avcapture.interleaved" = "Interleaved";
+"wearable.avcapture.planar" = "Non-interleaved";

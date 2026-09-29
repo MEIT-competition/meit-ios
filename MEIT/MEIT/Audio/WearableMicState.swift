@@ -45,15 +45,11 @@ struct BuiltInMicDataSource: Identifiable, Sendable {
     }
 }
 
-enum WearableStereoRequest: String, Sendable {
-    case notRequested, noStereoSource, requested, channelsUnavailable, failed
-    var localizationKey: String { "wearable.stereoRequest.\(rawValue)" }
-}
-
 // Immutable snapshots are published by the existing audio owner; metadata for a future laptop transport; no transport or motor command.
 struct WearableMicState: Sendable {
     var availableDataSources: [BuiltInMicDataSource] = []
-    var stereoRequest: WearableStereoRequest = .notRequested
+    var activeMultichannelMode = "—"
+    var capturePCM: CapturePCMDescription?
     var sessionCategory = "—"
     var sessionMode = "—"
     var preferredChannels = 0
@@ -86,6 +82,8 @@ struct WearableMicState: Sendable {
         let port = session.currentRoute.inputs.first
         let source = port?.selectedDataSource
         var state = Self()
+        state.availableDataSources = (session.availableInputs?.first(where: { $0.portType == .builtInMic })?.dataSources ?? [])
+            .map { BuiltInMicDataSource($0) }
         state.sessionCategory = session.category.rawValue
         state.sessionMode = session.mode.rawValue
         state.preferredChannels = session.preferredInputNumberOfChannels
@@ -118,144 +116,65 @@ struct WearableMicState: Sendable {
     }
 }
 
-// Only touches preferences while the session is active and the engine/tap are not running.
-// Retain failed restoration work so a later start cannot silently inherit wearable capture settings.
+// Snapshot the shared session before AVFoundation's automatic recording configuration.
+// MainActor only; restore ONLY after the AVCapture backend's stop/drain barrier completes.
 @MainActor
 final class WearableAudioPreferences {
+    private let category: AVAudioSession.Category
+    private let mode: AVAudioSession.Mode
+    private let options: AVAudioSession.CategoryOptions
     private let previousInput: AVAudioSessionPortDescription?
-    private var port: AVAudioSessionPortDescription
-    private let previousMode: AVAudioSession.Mode
-    private var modeChanged = false
-    private(set) var availableDataSources: [BuiltInMicDataSource] = []
-    private(set) var configurationStep = "session mode"
-    private let previousDataSource: AVAudioSessionDataSourceDescription?
-    private var source: AVAudioSessionDataSourceDescription?
-    private var previousPattern: AVAudioSession.PolarPattern?
-    private let previousOrientation: AVAudioSession.StereoOrientation
-    private let previousChannels: Int
-    private var inputChanged = false
-    private var sourceChanged = false
-    private var patternChanged = false
-    private var orientationChanged = false
-    private var channelsChanged = false
+    private let port: AVAudioSessionPortDescription
+    private let dataSource: AVAudioSessionDataSourceDescription?
+    private let patterns: [(AVAudioSessionDataSourceDescription, AVAudioSession.PolarPattern?)]
+    private let orientation: AVAudioSession.StereoOrientation
+    private let channels: Int
 
     init?(session: AVAudioSession) {
         guard let port = session.availableInputs?.first(where: { $0.portType == .builtInMic }) else { return nil }
         self.port = port
+        category = session.category
+        mode = session.mode
+        options = session.categoryOptions
         previousInput = session.preferredInput
-        previousDataSource = port.preferredDataSource
-        previousMode = session.mode
-        previousOrientation = session.preferredInputOrientation
-        // The API rejects 0. Preserve the effective baseline if no positive preference was set.
-        previousChannels = session.preferredInputNumberOfChannels > 0
+        dataSource = port.preferredDataSource
+        patterns = (port.dataSources ?? []).filter { !($0.supportedPolarPatterns ?? []).isEmpty }
+            .map { ($0, $0.preferredPolarPattern) }
+        orientation = session.preferredInputOrientation
+        // Zero means unspecified; the setter rejects 0, so preserve the effective baseline count.
+        channels = session.preferredInputNumberOfChannels > 0
             ? session.preferredInputNumberOfChannels : max(1, session.inputNumberOfChannels)
     }
 
-    func requestStereo(_ session: AVAudioSession) throws -> WearableStereoRequest {
-        // Wearable owner only. Measurement selects the primary mic; enumerate again in default mode.
-        // Apple: activate before availableInputs/input selection and channel-count requests.
-        // https://developer.apple.com/library/archive/qa/qa1799/_index.html
-        if session.mode != .default {
-            modeChanged = true
-            try session.setMode(.default)
-        }
-        configurationStep = "activate default-mode session"
+    func prepareForCapture(_ session: AVAudioSession) throws {
+        try session.setCategory(.record, mode: .default, options: [])
         try session.setActive(true)
-        configurationStep = "enumerate built-in microphone sources"
-        guard let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) else {
-            throw StereoConfigurationError(details: "No built-in microphone input is available.")
-        }
-        port = builtIn
-        let sources = port.dataSources ?? []
-        availableDataSources = sources.map { BuiltInMicDataSource($0) }
-        let candidates = sources.filter { $0.supportedPolarPatterns?.contains(.stereo) == true }
-        // Keep the existing front-first choice; never infer physical channel mapping from it.
-        source = candidates.first(where: { $0.orientation == .front }) ?? candidates.first
-        previousPattern = source?.preferredPolarPattern
-
-        configurationStep = "preferred built-in input"
-        if session.preferredInput?.uid != port.uid {
-            inputChanged = true
-            try session.setPreferredInput(port)
-        }
-        guard let source else { return .noStereoSource } // Keep real mono capture / AI PCM working.
-
-        // Apple's stereo sample sets the source's pattern before selecting that source on the port.
-        // https://developer.apple.com/documentation/avfaudio/capturing-stereo-audio-from-built-in-microphones
-        configurationStep = "preferred stereo polar pattern"
-        if source.preferredPolarPattern != .stereo {
-            patternChanged = true
-            try source.setPreferredPolarPattern(.stereo)
-        }
-        configurationStep = "preferred stereo data source"
-        if port.preferredDataSource?.dataSourceID != source.dataSourceID {
-            sourceChanged = true
-            try port.setPreferredDataSource(source)
-        }
-        configurationStep = "preferred portrait input orientation"
-        if session.preferredInputOrientation != .portrait {
-            orientationChanged = true
-            try session.setPreferredInputOrientation(.portrait)
-        }
-        // Query capacity only after the stereo source is applied to the active route.
-        configurationStep = "activate configured stereo source"
-        try session.setActive(true)
-        guard session.maximumInputNumberOfChannels >= 2 else { return .channelsUnavailable }
-        configurationStep = "preferred input channels = 2"
-        if session.preferredInputNumberOfChannels != 2 {
-            channelsChanged = true
-            try session.setPreferredInputNumberOfChannels(2)
-        }
-        // This records a request, not success. Session/node/buffer counts decide stereoUsable.
-        return .requested
+        try session.setPreferredInput(port)
+        // No polar-pattern stereo/channel request: AVCapture's multichannel API owns that path.
     }
 
     func restore(_ session: AVAudioSession) throws {
-        // Attempt every changed property; one failed call must not skip the other restorations.
         var failures: [String] = []
-        // A retry may begin in measurement mode. Restore stereo preferences in their valid mode.
-        if modeChanged && session.mode != .default { try session.setMode(.default) }
-        if orientationChanged {
-            do { try session.setPreferredInputOrientation(previousOrientation); orientationChanged = false }
-            catch { failures.append("orientation: \(error.localizedDescription)") }
-        }
-        if patternChanged, let source {
-            do { try source.setPreferredPolarPattern(previousPattern); patternChanged = false }
+        // The session may have been reconfigured automatically, including category options.
+        do { try session.setCategory(.record, mode: .default, options: []) }
+        catch { failures.append("restore preparation: \(error.localizedDescription)") }
+        let currentPort = session.availableInputs?.first(where: { $0.portType == .builtInMic }) ?? port
+        for (original, pattern) in patterns {
+            let source = currentPort.dataSources?.first(where: { $0.dataSourceID == original.dataSourceID }) ?? original
+            do { try source.setPreferredPolarPattern(pattern) }
             catch { failures.append("polar pattern: \(error.localizedDescription)") }
         }
-        if sourceChanged {
-            do { try port.setPreferredDataSource(previousDataSource); sourceChanged = false }
-            catch { failures.append("data source: \(error.localizedDescription)") }
-        }
-        if inputChanged {
-            do { try session.setPreferredInput(previousInput); inputChanged = false }
-            catch { failures.append("input: \(error.localizedDescription)") }
-        }
-        // Restore the channel preference after returning to the original input route.
-        if channelsChanged && !inputChanged {
-            do {
-                // Route loss can reduce the maximum. A valid channel count on the new route is safe.
-                try session.setPreferredInputNumberOfChannels(min(previousChannels, max(1, session.maximumInputNumberOfChannels)))
-                channelsChanged = false
-            } catch { failures.append("channel count: \(error.localizedDescription)") }
-        }
-        // Restore the baseline mode last; retain the snapshot if any earlier restoration failed.
-        if failures.isEmpty && modeChanged {
-            do { try session.setMode(previousMode); modeChanged = false }
-            catch { failures.append("session mode: \(error.localizedDescription)") }
-        }
-        if !failures.isEmpty {
-            throw PreferenceRestoreError(details: failures.joined(separator: "; "))
-        }
-    }
-
-    private struct StereoConfigurationError: LocalizedError {
-        let details: String
-        var errorDescription: String? { details }
-    }
-
-    private struct PreferenceRestoreError: LocalizedError {
-        let details: String
-        var errorDescription: String? { "Unable to restore microphone preferences: \(details)" }
+        do { try currentPort.setPreferredDataSource(dataSource) }
+        catch { failures.append("data source: \(error.localizedDescription)") }
+        do { try session.setPreferredInputOrientation(orientation) }
+        catch { failures.append("orientation: \(error.localizedDescription)") }
+        do { try session.setPreferredInput(previousInput) }
+        catch { failures.append("input: \(error.localizedDescription)") }
+        do { try session.setCategory(category, mode: mode, options: options) }
+        catch { failures.append("category/mode: \(error.localizedDescription)") }
+        do { try session.setPreferredInputNumberOfChannels(min(channels, max(1, session.maximumInputNumberOfChannels))) }
+        catch { failures.append("channel count: \(error.localizedDescription)") }
+        // Keep this entire snapshot for retry if even one restoration failed; never start over it.
+        if !failures.isEmpty { throw CapturePCMError("Unable to restore microphone preferences: \(failures.joined(separator: "; "))") }
     }
 }

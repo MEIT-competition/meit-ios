@@ -33,6 +33,8 @@ final class AudioCaptureManager: ObservableObject {
     private var aiProcessor: AIInputProcessor?
     private var aiStatusTask: Task<Void, Never>?
     private var snapshotPending = false
+    private var wearableCapture: WearableStereoCapture?
+    private var wearableStopTask: Task<Void, Never>?
     private var wearablePreferences: WearableAudioPreferences?
     private var wearableEstimator = StereoDirectionEstimator()
     private var wearableRouteSignature: String?
@@ -78,6 +80,14 @@ final class AudioCaptureManager: ObservableObject {
             if captureID == id { isStarting = false }
         }
 
+        // Stop is asynchronous for AVCapture. Both backends must wait for its complete cleanup.
+        if let pendingStop = wearableStopTask {
+            await pendingStop.value
+            guard captureID == id, captureOwner == owner else { return }
+            if Task.isCancelled { stopCapture(owner: owner); return }
+            wearableStopTask = nil
+            errorMessage = nil // A failed old cleanup will be retried below; do not keep a stale error after success.
+        }
         refreshPermission()
         if microphonePermission == .notDetermined {
             _ = await AVAudioApplication.requestRecordPermission()
@@ -95,8 +105,7 @@ final class AudioCaptureManager: ObservableObject {
         }
 
         do {
-            // Preserve the iPhone-mode baseline. Only the wearable preferences transaction
-            // temporarily changes mode to default, before creating any engine or tap.
+            // Preserve the iPhone-mode baseline; wearable snapshots it before its own backend.
             try session.setCategory(.record, mode: .measurement, options: [])
             try session.setActive(true)
             sessionActive = true
@@ -104,22 +113,45 @@ final class AudioCaptureManager: ObservableObject {
             // A failed previous restoration must be resolved before either mode can capture.
             try restoreWearablePreferences()
             if owner == .wearableMode {
+                guard #available(iOS 18.0, *) else { throw CapturePCMError("Wearable stereo capture requires iOS 18 or later.") }
                 wearableMic = .init()
                 wearableEstimator.reset()
                 wearablePreferences = WearableAudioPreferences(session: session)
                 guard let preferences = wearablePreferences else { throw CaptureError.unavailableInput }
-                do { wearableMic.stereoRequest = try preferences.requestStereo(session) }
-                catch {
-                    // A stereo request failure is not a mono capture failure. Undo partial requests.
-                    wearableMic.stereoRequest = .failed
-                    wearableMic.configurationNote = "\(preferences.configurationStep): \(error.localizedDescription)"
-                    try restoreWearablePreferences()
-                }
-                wearableMic.availableDataSources = preferences.availableDataSources
-                // Wearable mode uses the built-in iPhone microphone, not an external headset.
-                guard session.currentRoute.inputs.first?.portType == .builtInMic else {
-                    throw CaptureError.unavailableInput
-                }
+                try preferences.prepareForCapture(session)
+                let capture = WearableStereoCapture(onPrepared: { [weak self] format, processor in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.captureID == id, self.captureOwner == .wearableMode else { return }
+                        let mode = self.wearableMic.activeMultichannelMode
+                        self.wearableMic = .inspect(self.session, nodeChannels: 0)
+                        self.wearableMic.activeMultichannelMode = mode
+                        self.wearableMic.capturePCM = format
+                        self.wearableMic.bufferChannels = format.channels
+                        self.wearableRouteSignature = self.currentWearableRouteSignature()
+                        self.inputFormatDescription = "\(Int(format.sampleRate)) Hz · \(format.channels) channel(s) · AVCapture"
+                        self.aiProcessor = processor
+                        self.monitorAIInput(processor, captureID: id)
+                    }
+                }, onReading: { [weak self] dbFS, reading in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.captureID == id, self.isCapturing else { return }
+                        self.rmsDBFS = self.hasMeterReading ? self.rmsDBFS + 0.25 * (dbFS - self.rmsDBFS) : dbFS
+                        self.hasMeterReading = true
+                        self.updateWearableReading(reading)
+                    }
+                }, onFailure: { [weak self] message in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.captureID == id else { return }
+                        self.stopForSystemEvent(message)
+                    }
+                })
+                wearableCapture = capture
+                let mode = try await capture.start()
+                guard captureID == id, captureOwner == owner else { return }
+                if Task.isCancelled { stopCapture(owner: owner); return }
+                wearableMic.activeMultichannelMode = mode
+                isCapturing = true
+                return // Wearable never constructs an AVAudioEngine or installs an input tap.
             }
 
             // A fresh engine per capture avoids carrying a stopped/changed graph into a restart.
@@ -130,15 +162,6 @@ final class AudioCaptureManager: ObservableObject {
             guard format.sampleRate.isFinite, format.sampleRate > 0,
                   format.channelCount > 0, format.commonFormat == .pcmFormatFloat32 else {
                 throw CaptureError.unavailableInput
-            }
-
-            if owner == .wearableMode {
-                let configuration = wearableMic
-                wearableMic = .inspect(session, nodeChannels: Int(format.channelCount))
-                wearableMic.availableDataSources = configuration.availableDataSources
-                wearableMic.stereoRequest = configuration.stereoRequest
-                wearableMic.configurationNote = configuration.configurationNote
-                wearableRouteSignature = currentWearableRouteSignature()
             }
 
             let processor = try AIInputProcessor(nativeFormat: format) { [weak self] message in
@@ -182,6 +205,7 @@ final class AudioCaptureManager: ObservableObject {
                 self.stopForSystemEvent("Audio input changed. Tap Start Capture to retry.")
             }
         } catch {
+            guard captureID == id else { return } // A cancelled old AVCapture start cannot stop a new owner.
             stopCapture()
             errorMessage = "Unable to start microphone: \(error.localizedDescription)"
         }
@@ -229,7 +253,11 @@ final class AudioCaptureManager: ObservableObject {
             tapInstalled = false
         }
         engine = nil
-        aiProcessor?.stop()
+        let stoppedWearable = wearableCapture
+        stoppedWearable?.invalidatePendingStart()
+        wearableCapture = nil
+        // The wearable helper stops its processor only after its sample producer has drained.
+        if stoppedWearable == nil { aiProcessor?.stop() }
         aiProcessor = nil
         aiBufferStatus = .empty
         rmsDBFS = -100
@@ -239,6 +267,17 @@ final class AudioCaptureManager: ObservableObject {
         wearableEstimator.reset()
         wearableRouteSignature = nil
 
+        if let stoppedWearable {
+            wearableStopTask = Task { [self] in
+                await stoppedWearable.stop()
+                restoreAndDeactivateSession()
+            }
+        } else if wearableStopTask == nil {
+            restoreAndDeactivateSession()
+        }
+    }
+
+    private func restoreAndDeactivateSession() {
         if sessionActive {
             do { try restoreWearablePreferences() }
             catch { errorMessage = error.localizedDescription }
@@ -266,13 +305,14 @@ final class AudioCaptureManager: ObservableObject {
 
     private func updateWearableReading(_ reading: NativeStereoReading) {
         guard captureOwner == .wearableMode else { return }
-        guard wearableRouteSignature == currentWearableRouteSignature() else {
+        guard session.currentRoute.inputs.first?.portType == .builtInMic,
+              wearableRouteSignature == currentWearableRouteSignature() else {
             stopForSystemEvent("iPhone microphone input changed. Turn the microphone on again to retry.")
             return
         }
         wearableMic.bufferChannels = reading.channels
-        let usable = wearableMic.configuredStereo && wearableMic.sessionChannels >= 2
-            && wearableMic.nodeChannels >= 2 && reading.channels >= 2
+        // AVCapture PCM channels, not the legacy AVAudioSession polar-pattern/node path, prove stereo.
+        let usable = wearableMic.activeMultichannelMode == "stereo" && reading.channels >= 2
         wearableMic.stereoUsable = usable
         wearableMic.channel1RMS = usable ? reading.channel1RMS : nil
         wearableMic.channel2RMS = usable ? reading.channel2RMS : nil
@@ -300,7 +340,7 @@ final class AudioCaptureManager: ObservableObject {
 
 // Callback-confined state: create once for each tap; never access it from the UI thread.
 // RMS remains native-format; AIInputProcessor copies PCM into its bounded conversion pipeline.
-private final class NativeRMSMeter {
+final class NativeRMSMeter {
     private var sumOfSquares = 0.0
     private var sampleCount = 0
     private var frameCount = 0
@@ -321,7 +361,7 @@ private final class NativeRMSMeter {
         }
     }
 
-    private func consume(_ buffer: AVAudioPCMBuffer, monitorStereo: Bool, measureStereo: Bool) -> (Double, NativeStereoReading?)? {
+    func consume(_ buffer: AVAudioPCMBuffer, monitorStereo: Bool, measureStereo: Bool) -> (Double, NativeStereoReading?)? {
         let frames = Int(buffer.frameLength)
         let channels = Int(buffer.format.channelCount)
         let sampleRate = buffer.format.sampleRate

@@ -10,7 +10,7 @@ struct WearableDiagnosticsView: View {
         // Report observed buffer channels, not the requested stereo configuration.
         switch state.bufferChannels {
         case 1: return language.text("wearable.mono")
-        case 2: return language.text("wearable.stereo")
+        case 2...: return language.text("wearable.stereo")
         default: return language.text("wearable.waiting")
         }
     }
@@ -55,7 +55,7 @@ private struct WearableAdvancedDiagnosticsView: View {
                 value("wearable.dataSource", state.dataSource)
                 value("wearable.maximumChannels", "\(state.maximumChannels)")
                 value("wearable.actualChannels", "\(state.sessionChannels)")
-                value("wearable.nodeChannels", "\(state.nodeChannels)")
+                value("wearable.nodeChannels", language.text("wearable.avcapture.noInputNode"))
                 value("wearable.bufferChannels", "\(state.bufferChannels)")
                 value("wearable.stereoUsable", language.text(state.stereoUsable ? "wearable.available" : "wearable.unavailable"))
                 if !state.stereoUsable {
@@ -88,7 +88,12 @@ private struct WearableAdvancedDiagnosticsView: View {
             Section(language.text("wearable.inputConfiguration")) {
                 value("wearable.sessionCategory", state.sessionCategory)
                 value("wearable.sessionMode", state.sessionMode)
-                value("wearable.stereoRequest", language.text(state.stereoRequest.localizationKey))
+                value("wearable.avcapture.activeMode", state.activeMultichannelMode)
+                if let pcm = state.capturePCM {
+                    value("wearable.avcapture.sampleRate", "\(pcm.sampleRate) Hz")
+                    value("wearable.avcapture.pcmFormat", pcm.formatSummary)
+                    value("wearable.avcapture.interleaving", language.text(pcm.interleaved ? "wearable.avcapture.interleaved" : "wearable.avcapture.planar"))
+                }
                 value("wearable.preferredChannels", "\(state.preferredChannels)")
                 value("wearable.supportedPatterns", state.supportedPatterns)
                 value("wearable.selectedPattern", state.selectedPattern)
