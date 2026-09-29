@@ -1,8 +1,9 @@
 # MEIT iOS
 
-현재 단계: **Phase 5 - Automatic detection / inference**.
+현재 단계: **Phase 6A - Single-iPhone stabilization**.
 
-Phase 5: **implemented / device validation pending**. 자동 동작은 실제 iPhone 검증 전이다.
+Phase 6A: **implemented / device validation pending**.
+Phase 6B: **Four-iPhone calibration and final integration — pending devices** (이번 단계에서 구현하지 않음).
 
 | 단계 | 범위 | 검증 상태 |
 |---|---|---|
@@ -11,9 +12,11 @@ Phase 5: **implemented / device validation pending**. 자동 동작은 실제 iP
 | Phase 2 | Native PCM → 16 kHz mono PCM16, 2.5초 rolling buffer | 실기기 40000 samples / 80000 bytes / 2.500 s / snapshot 확인 |
 | Phase 3 | 한 iPhone의 수동 snapshot → Windows 기존 AI → 결과 표시 | 실제 Wi-Fi end-to-end inference 확인 |
 | Phase 4 | FRONT / RIGHT / BACK / LEFT, RMS 방향, 해당 iPhone system vibration | 단일 실기기 진동·capture 중 진동 확인, 실제 4-phone 방향 검증 필요 |
-| Phase 5 | 중앙 RMS event → 한 iPhone snapshot → 기존 AI → targeted vibration | Windows 테스트·실제 모델 가상 기기 검증, 실제 iPhone 자동 동작 검증 필요 |
+| Phase 5 | 중앙 RMS event → 한 iPhone snapshot → 기존 AI → targeted vibration | 사용자 단일 iPhone 검증: 자동 siren 99.7%, FRONT / UNKNOWN / 진동 없음 |
+| Phase 6A | Single-iPhone stabilization / diagnostics / latency / recovery | 구현됨, 새로운 IPA·실기기 반복/장시간 검증 필요 |
+| Phase 6B | Four-iPhone calibration and final integration | pending devices, 미구현 |
 
-Phase 0–3 및 Phase 4 system vibration의 실제 기기 실행 결과는 사용자 확인에 근거한다.
+Phase 0–3, Phase 4 system vibration, Phase 5 단일 iPhone 자동 실행 결과는 사용자 확인에 근거한다.
 
 `meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
 장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
@@ -54,6 +57,7 @@ meit-ios/
 │   ├── coordination.py
 │   ├── automatic.py
 │   ├── test_automatic.py
+│   ├── test_reliability.py
 │   ├── test_coordination.py
 │   ├── test_bridge.py
 │   └── README.md
@@ -280,7 +284,7 @@ Windows 단위 테스트는 기존 Phase 3 동작과 registration/conflict/stale
 
 ## Phase 5 자동 감지 / 추론
 
-**implemented / device validation pending**. 서버 기본값은 Auto OFF이다.
+사용자 확인으로 단일 iPhone 자동 inference 검증 완료. 서버 기본값은 Auto OFF이다.
 Test Connection → Start Capture → AI Buffer Ready → **Start Auto Detection** 순서로 사용한다.
 Auto는 모든 폰이 공유하는 bridge 설정이며 OFF여도 기존 수동 기능은 유지된다.
 
@@ -310,7 +314,27 @@ Send Snapshot 없이 Source FRONT / label / confidence / Direction UNKNOWN이 �
 
 Windows 테스트와 가상 기기를 사용한 실제 SavedModel 결과는
 [bridge/README.md](bridge/README.md)의 Phase 5 검증 절에 기록한다.
-새 Swift 코드의 Xcode 빌드·IPA 및 실제 iPhone 자동 동작은 아직 검증하지 않았다.
+Phase 5 단일 iPhone 검증과 Phase 6A 변경의 새로운 Xcode 빌드·IPA·실기기 검증을 구분한다.
+
+## Phase 6A: Single-iPhone stabilization
+
+**implemented / device validation pending**. trigger -30 dBFS, rearm -33 dBFS / 750 ms,
+cooldown 3000 ms, audio timeout 3000 ms 및 기존 judge 정책을 유지한다. 자동 tuning은 없다.
+
+- Auto 아래 **Diagnostics**에서 현재 RMS/threshold, cooldown 남은 시간, armed/quiet 진행도,
+  이벤트 단계별 서버 시각과 다섯 latency 구간을 확인한다. 시각은 서버 시작 이후 ms이며 폰 시각과 비교하지 않는다.
+- Server polling / registration / RMS reporting / Auto sync / 마지막 성공 경과시간 / 마지막 오류를 구분한다.
+  수동 요청 실패 뒤 foreground 복귀 시 이전 연결 성공 주소에 다시 등록하도록 조건을 보완했다.
+- `GET /diagnostics`에 최근 event 20개와 고정 카운터를 제공한다. event ID는 앞 8자리만 표시하며
+  device UUID/IP/PCM을 포함하지 않는다. 기존 command 전송에 필요한 전체 UUID 계약은 유지한다.
+- 이벤트 전환 때만 짧은 console log를 남기며, RMS packet마다 출력하거나 파일에 오디오를 저장하지 않는다.
+- Audio pipeline, system vibration, 방향 알고리즘, 외부 AI 및 unsigned workflow는 변경하지 않는다.
+
+상세 timing 정의, Windows soak 결과, A–I 단일 기기 체크리스트와 소리별 실험표는
+[bridge/README.md](bridge/README.md)의 Phase 6A 절을 따른다.
+발표 전 실제 폰에서 baseline → 지속음 → quiet/rearm → Auto OFF → 수동 fallback →
+Stop/Start → 서버 재시작 → background/foreground → **10~20분 실행**을 확인해야 한다.
+실제 네 대 calibration / margin 최종 tuning / 통합 검증은 **Phase 6B — pending devices**다.
 
 ## GitHub Actions 빌드
 
@@ -403,10 +427,11 @@ App Store 배포는 현재 범위에 포함하지 않는다.
 
 작성 환경은 **Windows이며 Xcode가 없다**. Phase 0–3의 실제 기기 검증은 사용자 확인으로
 완료했다. Phase 4 system vibration과 capture 중 진동도 사용자 확인으로 검증되었다.
-**Phase 5 변경의 Xcode 컴파일·IPA·실제 iPhone 자동 동작 및 실제 네 iPhone 동시 방향은 아직 검증하지 않았다.**
+Phase 5는 실제 단일 iPhone에서 자동 siren 99.7% 결과를 확인했다.
+**Phase 6A 변경의 Xcode 컴파일·IPA·실기기 안정성 및 실제 네 iPhone 동시 방향은 아직 검증하지 않았다.**
 Windows bridge의 기존·신규 단위 테스트 및 정적 검토를 수행한다. 가상 device/합성 PCM으로
 실행한 검증은 실제 microphone 감도·방향 정확도·물리적인 진동을 확인한 것이 아니다.
-기존 unsigned workflow로 빌드한 뒤 bridge 문서의 네 iPhone 테스트를 수행해야 한다.
+기존 unsigned workflow로 빌드한 뒤 bridge 문서의 Phase 6A 단일 iPhone 체크리스트를 수행해야 한다.
 
 runner 이미지와 기본 Xcode는 갱신될 수 있다. 각 실행의 **Set up job**과
 **Inspect Xcode and iOS SDK** 로그를 기준으로 빌드 환경을 확인한다.

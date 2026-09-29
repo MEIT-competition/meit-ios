@@ -259,3 +259,12 @@ class Coordinator:
             for item in self.devices.values():
                 if item.pending is not None and item.pending.get("event_id") == event_id:
                     item.pending = None
+
+    def diagnostics_counts(self):
+        with self.lock:
+            now = self.clock()
+            states = self._selection(now).result["devices"].values()
+            return {"registered_device_count": len(self.devices),
+                    "fresh_device_count": sum(state["fresh"] for state in states),
+                    "pending_command_count": sum(d.pending is not None and d.command_expires > now
+                                                 for d in self.devices.values())}

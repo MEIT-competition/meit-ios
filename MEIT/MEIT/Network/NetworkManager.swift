@@ -43,11 +43,15 @@ final class NetworkManager: ObservableObject {
             if serverAddress != oldValue {
                 cancel()
                 connectionStatus = "Not Tested"
+                hasConnected = false
                 errorMessage = nil
             }
         }
     }
     @Published private(set) var connectionStatus = "Not Tested"
+    // A later manual timeout must not disable foreground registration recovery.
+    // Cleared only when the user changes the server address.
+    @Published private(set) var hasConnected = false
     @Published private(set) var isBusy = false
     @Published private(set) var isSending = false
     @Published private(set) var result: AIInferenceResult?
@@ -99,6 +103,7 @@ final class NetworkManager: ObservableObject {
                   health.status == "ok" else {
                 throw NetworkFailure(message: "Malformed /health response.")
             }
+            hasConnected = true
             connectionStatus = "Connected"
         }
     }
@@ -124,6 +129,7 @@ final class NetworkManager: ObservableObject {
                 throw NetworkFailure(message: "Malformed inference response.")
             }
             result = response
+            hasConnected = true
             connectionStatus = "Connected"
         }
     }

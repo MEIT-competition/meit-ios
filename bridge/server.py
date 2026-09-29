@@ -1,6 +1,7 @@
 """Concurrent LAN HTTP bridge with serialized AI inference. No audio is saved."""
 import argparse
 import json
+import logging
 import os
 import socket
 import sys
@@ -9,7 +10,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from automatic import AutomaticDetection
+from automatic import AutomaticDetection, increment
 from meit_ai_adapter import MEITAIAdapter, PAYLOAD_BYTES
 from coordination import Coordinator, ProtocolError, RMS_MAX_AGE_SECONDS, DIRECTION_MARGIN_DB
 
@@ -25,7 +26,19 @@ class BridgeServer(ThreadingHTTPServer):
         self.coordinator = coordinator if coordinator is not None else Coordinator()
         self.automatic = automatic if automatic is not None else AutomaticDetection(self.coordinator)
         self.inference_lock = threading.Lock()
+        self.stats_lock = threading.Lock()
+        self.counters = {"rms_reports_count": 0, "inference_count": 0}
         super().__init__(address, BridgeHandler)
+
+    def count(self, key):
+        with self.stats_lock:
+            increment(self.counters, key)
+
+    def diagnostics(self):
+        with self.stats_lock:
+            counts = dict(self.counters)
+        return {"auto": self.automatic.diagnostics(), **self.coordinator.diagnostics_counts(),
+                **counts, "model_loaded": True, "inference_busy": self.inference_lock.locked()}
 
     def service_actions(self):
         # serve_forever ticks even when no phone sends another request.
@@ -89,6 +102,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
             path = urlsplit(self.path)
             if path.path == "/health" and not path.query:
                 result = {"status": "ok"}
+            elif path.path == "/diagnostics" and not path.query:
+                result = self.server.diagnostics()
             elif path.path == "/auto/status" and not path.query:
                 result = self.server.automatic.status()
             elif path.path == "/devices" and not path.query:
@@ -140,6 +155,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     result = coordinator.register(body)
                 elif self.path == "/device/rms":
                     result = coordinator.report_rms(body)
+                    self.server.count("rms_reports_count")
                     self.server.automatic.observe()
                 elif self.path in ("/auto/start", "/auto/stop"):
                     result = self.server.automatic.set_enabled(self.path == "/auto/start")
@@ -194,11 +210,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with self.server.inference_lock:
                 if automatic:
                     self.server.automatic.check_inference(claimed)
+                    self.server.count("inference_count")
                     result = self.server.adapter.infer_auto(payload)
                     result = self.server.automatic.complete(claimed, result)
                 else:
                     # Manual Phase 4 still selects direction immediately before inference.
                     selected = coordinator.selection()
+                    self.server.count("inference_count")
                     result = self.server.adapter.infer(payload)
                     result = coordinator.after_inference(result, selected)
         except ProtocolError as error:
@@ -223,6 +241,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ai-path", default=os.environ.get("MEIT_AI_PATH"))
     parser.add_argument("--host", default="0.0.0.0")

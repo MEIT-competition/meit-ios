@@ -1,8 +1,10 @@
-# Windows bridge — Phase 3 / Phase 4 / Phase 5
+# Windows bridge — Phase 6A
 
 Phase 3: 사용자 확인으로 실제 iPhone Wi-Fi end-to-end inference 성공.
 Phase 4: system vibration 및 capture 중 진동은 사용자 실기기 확인 완료. 네 실제 iPhone 동시 방향 검증은 필요.
-Phase 5: **Automatic detection / inference — implemented / device validation pending**.
+Phase 5: 실제 단일 iPhone 자동 siren 99.7%, FRONT / UNKNOWN / 방향 진동 없음 — 사용자 검증 완료.
+Phase 6A: **Single-iPhone stabilization — implemented / device validation pending**.
+Phase 6B: **Four-iPhone calibration and final integration — pending devices**, 이번 단계에서 미구현.
 Python 표준 라이브러리 HTTP 서버이며 웹 프레임워크를 추가하지 않는다.
 기존 `meit-ai`는 별도 저장소로 유지한다. 소스·모델·학습 데이터는 이 저장소에 넣지 않는다.
 
@@ -350,7 +352,7 @@ Python 자동 테스트는 물리적인 진동, UI lifecycle, 네 기기 방향 
 
 ## Phase 5: 중앙 Automatic Detection / Inference
 
-**implemented / device validation pending**. 서버 시작 시 Auto OFF, 재시작 시 이전 이벤트는 복구하지 않는다.
+Phase 5는 단일 실제 iPhone에서 검증되었다. 서버 시작 시 Auto OFF, 재시작 시 이전 이벤트는 복구하지 않는다.
 한 이벤트에 source 한 대, PCM 한 개, model 호출 최대 한 번이다. 1대부터 자동 AI를 실행하며
 방향/진동 조건은 Phase 4의 네 role fresh + margin 조건과 분리한다.
 
@@ -461,8 +463,8 @@ TensorFlow가 반환하지 않는 상황은 강제 thread 종료하지 않는다
 - 주소/role 변경, disconnect, inactive/background, capture Stop에서 auto snapshot task를 취소한다.
   background 실행은 보장하지 않는다. 이미 서버가 수락한 추론은 로컬 upload 취소만으로 취소되지 않는다.
   서버 전체 자동 이벤트를 중단하려면 **Stop Auto Detection**을 사용한다.
-- 서버는 active event 최대 1개 + 마지막 완료/실패 기록 1개만 보관한다. PCM은 이벤트 history에 저장하지 않는다.
-  기기 registry 최대 16개, pending 기기당 1개, event ID 누적 set/list 없음, 이벤트별 timer/thread 없음.
+- 서버는 active event 최대 1개 + 마지막 완료/실패 기록 1개를 유지한다. Phase 6A는 최근 요약 기록 20개를 추가한다. PCM은 이벤트 history에 저장하지 않는다.
+  기기 registry 최대 16개, pending 기기당 1개, 무제한 event ID 누적 set/list 없음, 이벤트별 timer/thread 없음.
   CLI HTTP 서버의 기존 thread-per-request 방식은 유지하며 공개 인터넷용 서버로 확장하지 않았다.
 
 ### Phase 5 검증
@@ -476,7 +478,7 @@ Windows 실행:
 기존 29개에 Phase 5 gate/HTTP/adapter 회귀 테스트를 추가했다. fake clock과 mock model로
 OFF/1-phone/4-phone/source eligibility/threshold/재무장/cooldown/중복/timeout/Stop/
 trigger-time direction/manual 보존/AI와 RMS·health·poll 동시성을 검증한다.
-**최종 Windows Python 테스트 54개(기존 29 + 신규 25)가 모두 통과했다.**
+**Phase 5 Windows Python 테스트 54개(기존 29 + 신규 25)가 모두 통과했다.**
 전체 diff 및 `git diff --check`, Swift project reference 정적 검토, public 파일 민감정보 검사를 수행했다.
 
 실제 외부 SavedModel 별도 Windows HTTP smoke test(모델 mock 아님):
@@ -513,5 +515,183 @@ trigger-time direction/manual 보존/AI와 RMS·health·poll 동시성을 검증
 4. Auto/수동/Test Direction이 겹쳐도 command 중복 실행/무한 burst가 없어야 한다.
    추론 중 RMS가 바뀌어도 Last Auto Event direction은 trigger 당시 값을 유지해야 한다.
 
-Phase 5 Xcode build / IPA / 실제 iPhone 자동 UI·snapshot·진동 연계는 **미검증**이다.
+이후 사용자 확인으로 Phase 5 IPA의 단일 iPhone 자동 UI·snapshot·AI 결과는 검증되었다.
+사이렌 99.7%, source FRONT / direction UNKNOWN / 진동 없음은 단일 기기에서 정상 동작이다.
 실제 네 대 동시 방향 테스트는 기기 부족으로 별도 검증이 필요하다. 기존 system vibration 구현은 수정하지 않았다.
+
+## Phase 6A: Single-iPhone stabilization / tuning / reliability
+
+**implemented / device validation pending**. 실제 확인되지 않은 기준값을 변경하거나 자동 tuning하지 않는다.
+Phase 6B의 네 폰 calibration / direction margin 최종 tuning / final integration은 **pending devices**다.
+
+### 감사 결과와 변경 이유
+
+기존 trigger/source selection, cooldown/quiet rearm, snapshot, AI lock, `judge()`, manual,
+registration/retry 및 lifecycle을 다시 확인했다. Audio/system vibration/direction/AI adapter는 그대로 둔다.
+기존 54개 테스트도 수정하지 않는다.
+
+확인된 UI recovery 문제는 수동 요청 오류로 `connectionStatus=Failed`가 된 뒤 background에서
+polling이 중단되면, foreground 재접속이 `Connected` 조건 때문에 시작되지 않을 수 있다는 점이다.
+이전 연결 성공 여부(`hasConnected`)를 따로 유지해 같은 주소로 registration을 재시도한다.
+주소를 바꾸면 이 값은 초기화한다. 이는 현재 서버가 연결되었다는 뜻이 아니며 live 상태는 polling으로 표시한다.
+추가된 마지막 오류는 성공 packet마다 지우지 않고 한 개만 보관하며 disconnect/주소 전환에서 초기화한다.
+
+### Diagnostics UI와 read-only endpoint
+
+Auto 아래 펼칠 수 있는 **Diagnostics**에 다음을 표시한다.
+
+- Server (poll), Registration, RMS reporting, Command polling, Auto control sync
+- 마지막 성공 contact 경과시간(폰 내부 uptime 차이), 마지막 network 오류
+- 현재 local RMS, trigger/rearm threshold, cooldown remaining, armed / waiting_for_quiet / quiet_elapsed
+- 현재 이벤트 또는 마지막 이벤트의 source, trigger RMS/reason, 단계별 서버 시각, latency 5구간
+- 기존 Last Auto Event의 label/confidence/direction은 유지한다.
+
+현재 설정은 CLI에서 그대로 조절한다. 기본 trigger **-30 dBFS**, rearm **trigger - 3 dB = -33 dBFS**,
+quiet **750 ms**, cooldown **3000 ms**, audio timeout **3000 ms**, RMS 보고 약 **10 Hz**다.
+`quiet_elapsed_ms`는 마지막 실제 quiet 관측까지만 계산하고, 관측이 stale이면 0을 표시한다.
+네트워크 단절 시간을 quiet 충족 시간으로 표시하지 않는다.
+
+Windows bridge가 실행 중인 PC에서:
+
+```powershell
+$diagnostic = Invoke-RestMethod http://127.0.0.1:8765/diagnostics
+$diagnostic | ConvertTo-Json -Depth 10
+$diagnostic.auto.recent_events | Select-Object event_id_prefix, source, trigger_rms_dbfs, label, confidence, direction, outcome
+```
+
+`GET /diagnostics`는 설정을 변경하지 않는 local debug 조회다. 조회 시 기존 정책대로 만료 이벤트를 정리할 수 있다.
+`auto.server_uptime_ms`, auto state/current/last, recent count/limit/history, registered/fresh/pending 수,
+`model_loaded`, `inference_busy`, `rms_reports_count`, `inference_count`를 제공한다.
+`model_loaded`는 서버 생성 전 adapter 초기화 완료를 뜻하며 매 조회마다 모델을 다시 실행하지 않는다.
+`inference_count`는 자동+수동 adapter 호출 시도 수(실패 포함), `inference_busy`는 기존 model lock 점유 여부다.
+auto counter는 trigger/completed/timeout/stopped/source unavailable/inference failed/duplicate/inactive/source reject를 구분한다.
+여러 lock의 진단값은 짧은 간격의 관측이며 전체 서버의 원자적 snapshot은 아니다.
+
+이 endpoint/log에는 전체 event UUID, device UUID, client IP, PCM, 개인 경로가 없다.
+기존 `/device/command`, `/auto/status`, `/event/audio`는 동작에 필요한 기존 UUID 계약을 유지한다.
+새 diagnostics history는 iPhone polling에 포함하지 않아 응답 크기를 불필요하게 늘리지 않는다.
+
+### Timing 정의: 모든 이벤트 구간은 서버 monotonic clock
+
+`timestamps_ms`는 해당 bridge coordinator 생성 이후 ms이다. 날짜나 iPhone wall clock이 아니다.
+`triggered`, `snapshot_requested`, `snapshot_received`, `inference_started`, `inference_completed`, `finished`를 기록한다.
+발생하지 않은 단계는 없고 해당 latency는 null/화면의 — 이다.
+
+| latency | 시작 → 끝 |
+|---|---|
+| `trigger_to_command_ms` | trigger 생성 → snapshot command queue 등록 완료 |
+| `command_to_audio_ms` | queue 등록 → 완전한 PCM 수신 후 이벤트 검증/수락 |
+| `audio_to_inference_start_ms` | audio 수락 → model lock 획득 후 adapter 호출 직전 |
+| `latency.inference_ms` | adapter 호출 직전 → 반환/오류 확인 (decode/judge 등 포함) |
+| `total_event_ms` | trigger → 결과 준비 또는 timeout/stop/failure 처리 완료 |
+
+`command_to_audio_ms`에는 polling 대기, 네트워크, 폰 snapshot 생성, upload와 수락 검증이 함께 포함된다.
+순수 네트워크 지연이나 폰 처리시간이라고 해석하지 않는다. `total_event_ms`는 iPhone 결과 렌더링/진동 완료 시간이 아니다.
+기존 AI 결과의 `result.inference_ms`는 여전히 `predict_array()` 호출 시간이다. 두 inference 지표를 혼동하지 않는다.
+시계 동기화·cross-device timestamp subtraction은 추가하지 않았다.
+
+### Trigger 관찰 / event history / log
+
+Bridge trigger는 **언제 snapshot 추론을 시작할지** 정한다. 외부 AI의 **-50 dBFS / confidence 0.4 gate**는
+추론한 입력을 알림으로 인정할지 정한다. 다른 목적이며 서로 대체하지 않는다. `judge()`/calibration은 변경하지 않는다.
+현재 trigger는 이전 packet과의 엄격한 rising-edge 비교가 아니라 **armed 상태에서 source RMS가 기준 이상**인 조건이다.
+기존 동작을 유지하고 reason을 `armed_rms_at_or_above_threshold`로 기록한다.
+`trigger_rms_dbfs`, `trigger_threshold_dbfs`, source를 event 생성 시점에 한 번 기록한다.
+
+최근 terminal event는 **deque(maxlen=20)**에 compact summary로 보관한다. 기존 last_event도 유지한다.
+완료/오디오 timeout/Auto Stop/command unavailable/추론 실패를 각각 기록하고, 중복 거부는 별도 counter로 센다.
+중복 요청이 완료 이벤트 history를 덮거나 history를 채우지 않는다. 최근 20개 밖의 옛 event도 모델 호출은 거부되며,
+이 경우는 상세 duplicate 분류 대신 inactive rejection으로 집계할 수 있다.
+전체 event ID는 내부 최근 중복 분류용으로만 저장하고 diagnostics에는 앞 8자리만 내보낸다.
+
+고정 counter key는 signed 64-bit 최댓값에서 포화한다. 기기당 pending 1개, registry 최대 16개,
+active event 1개, iPhone 처리 command ID 최근 32개, 각 loop의 in-flight request 제한을 유지한다.
+새 event timer/thread, PCM history, 파일 로그는 추가하지 않았다.
+
+서버 console은 이벤트 단계에만 다음 형태로 출력한다. 평상시 10 Hz RMS별 출력은 없다.
+
+```text
+[AUTO] trigger event=<prefix> source=front rms=-24.1 threshold=-30.0
+[AUTO] snapshot requested event=<prefix>
+[AUTO] audio received event=<prefix>
+[AUTO] inference started event=<prefix>
+[AI] event=<prefix> label=siren confidence=0.997 alert=True
+[AUTO] completed event=<prefix> total=... ms direction=unknown
+```
+
+### Recovery / 중복 처리
+
+- bridge 종료 중에도 iPhone audio capture는 유지하며 polling은 Retrying, Auto는 Unavailable이다.
+  서버 재시작 후 기존 UUID로 register → RMS/poll 복구 → 새 Auto OFF 상태로 동기화한다. ON은 사용자가 다시 선택한다.
+- Stop Capture는 기존 pipeline을 정리하고 자동 upload task를 취소한다. 오래된 snapshot은 capture generation
+  검사로 거부한다. Start Capture 뒤 새 2.5초 buffer-ready와 RMS가 돌아오면 자동 source가 될 수 있다.
+  재무장되지 않았다면 quiet 조건을 먼저 충족해야 한다.
+- inactive/background에서 coordinator task/command action을 중단한다. foreground에서 재등록/상태 조회를 복구한다.
+  background에서 멈춘 capture는 자동으로 시작하지 않는다. 사용자가 Start Capture를 누른다.
+- upload가 유실되면 기존 3초 audio timeout → pending 정리 → cooldown → quiet 재무장 뒤 다음 event가 가능하다.
+  timeout 뒤 late upload는 새 이벤트를 점유하거나 모델을 실행하지 않는다.
+- command ID를 실행 전에 기록하고, event audio는 lock 안에서 한 번만 claim하는 기존 보호를 유지한다.
+  Auto Stop/로컬 task 취소는 이미 실행 중인 TensorFlow 호출을 강제 종료하지 않는다. 모델 자체가 멈추면 서버 재시작이 필요하다.
+- 수동 `/infer`는 Auto OFF/ON/cooldown/quiet 대기 모두 가능하다. Test Connection / Test Haptic /
+  Test Direction + Haptic도 유지하며 한 대에서 방향 UNKNOWN·방향 진동 없음은 정상이다.
+
+### Single-iPhone 발표 전 체크리스트 (A–I)
+
+현재 Phase 6A의 실제 iPhone 검증은 **pending**이다. 아래 표를 실제 새 IPA로 수행하고 결과를 기록한다.
+기존 workflow_dispatch 빌드·unsigned IPA·Sideloadly 절차는 동일하며 이번 Windows 작업은 Xcode 컴파일을 확인하지 못한다.
+
+| 단계 | 수행 | 통과 기준 |
+|---|---|---|
+| A Baseline | FRONT, Test Connection → Start Capture → Buffer Ready → Auto ON → 사이렌 | 수동 Send Snapshot 없이 결과, source FRONT / direction UNKNOWN / 진동 없음, timing 5개 표시 |
+| B Sustained | 사이렌을 cooldown보다 오래 계속 재생 | 첫 이벤트 이후 새 이벤트/추론이 계속 생성되지 않음 |
+| C Rearm | 소리 중단, -33 dBFS 미만 quiet 750 ms 확인 → 다시 사이렌 | armed로 복귀 후 새 event ID와 결과 생성 |
+| D Auto OFF | Stop Auto Detection → 큰 소리 | 신규 자동 event 없음, capture/RMS 유지 |
+| E Manual fallback | OFF/ON/cooldown/quiet 대기 각각 Send Snapshot | 수동 결과 정상; Test Haptic도 정상, 한 대의 Test Direction은 UNKNOWN |
+| F Capture recovery | Auto ON에서 Stop Capture → Start Capture | 멈춘 동안 snapshot 없음, 새 buffer-ready/quiet 이후 자동 결과 복구 |
+| G Server restart | capture 중 bridge Ctrl+C → 재실행 | 앱/mic 유지, 오류 표시 → registration/RMS/poll 복구, Auto OFF 동기화; 다시 ON 후 성공 |
+| H Background | 수동 요청 실패 상태도 포함해 background → foreground | 자동 task 중단, 복귀 시 재등록/상태 동기화; Start Capture 후 복구 |
+| I Soak | foreground 10~20분, 위 소리/quiet/Stop·Start 반복 | crash/중복 추론/지속음 폭주 없음, history ≤20, 다음 이벤트 반복 성공 |
+
+추가 timeout 시험: snapshot command 직후 Wi-Fi를 끊고 서버의 audio_timeout/command 정리를 확인한다.
+복구 후 quiet + cooldown을 충족하고 다음 이벤트가 성공하는지 확인한다. 같은 이벤트 duplicate/late upload의 모델 미호출은
+Windows 회귀 테스트로 검증하고, 현장에서는 timeout과 다음 이벤트 복구를 확인한다.
+
+### False / missed trigger 실험표
+
+조용한 방, 말소리, 음악, 손뼉, 사이렌, 경적, 충돌음을 같은 조건으로 반복한다.
+Peak RMS는 UI에서 관찰해 수동 기록한다. 자동 peak detector/threshold optimizer는 구현하지 않는다.
+trigger가 없으면 label/confidence/latency는 — 로 기록하고, trigger가 있어도 normal 또는 judge 억제일 수 있다.
+
+| Test | Sound | Distance | Playback volume | Peak RMS | Triggered? | Trigger RMS | Label | Confidence | Total latency | Outcome / 메모 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Quiet room | — | — | | | | | | | |
+| 2 | Speech | | | | | | | | | |
+| 3 | Music | | | | | | | | | |
+| 4 | Clap | | | | | | | | | |
+| 5 | Siren | | | | | | | | | |
+| 6 | Horn | | | | | | | | | |
+| 7 | Crash sound | | | | | | | | | |
+
+Phase 6A acceptance는 위 A–I 실제 반복 성공, timeout 후 복구, duplicate 없음, latency 관측,
+bounded history/resources가 확인된 뒤 판단한다. Windows simulated soak를 실제 10~20분 iPhone 통과로 대체하지 않는다.
+
+### Phase 6A Windows 검증 기록
+
+- **총 60개 테스트 통과**: 기존 54개 유지 + timing/privacy, timeout 뒤 다음 event,
+  서버 재시작/OFF 동기화, 모든 auto 상태의 manual fallback/concurrency,
+  counter 포화/repeated control, HTTP soak 6개 추가. 전체 실행 약 76초.
+- Accelerated HTTP soak: **RMS 2760회, automatic event/model fake 호출 60회, duplicate 거부 60회**.
+  sustained sound는 cooldown보다 길게 유지한 뒤 quiet를 관측시켜 반복하고, poll/health/Auto ON/OFF를 함께 실행했다.
+- 결과: recent history **20개**, registry **1개**, pending **기기당 1개 이하**, 종료 시 active event 없음.
+  cycle 경계에서 관측한 Python thread 시작/최대/종료 **2/3/2**, 워밍업(20 cycle) 이후 tracemalloc 잔류 증가 **12043 bytes**.
+  테스트 자체가 PCM을 보관하지 않도록 stateless fake model을 사용했다. 이 수치는 Python 할당 관측이며
+  전체 OS RSS나 실제 TensorFlow 장시간 메모리 검증이 아니다. 가상 clock의 가속 시험이며 실시간 10~20분 시험도 아니다.
+- 실제 외부 SavedModel automatic HTTP regression도 별도로 1회 실행했다(mock 아님).
+  가상 FRONT / 메모리 합성 교대 tone → 기존 `predict_array()` / `judge()` → **siren 97.99%, danger=true**,
+  direction UNKNOWN, haptic 없음. 모델 호출 **1회**, 중복 upload **409 / duplicate counter 1**.
+- 해당 실행의 timing: trigger→command **0.0 ms**, command→audio **78.0 ms**,
+  audio→inference start **0.0 ms**, server inference **781.0 ms**, total event **859.0 ms**.
+  기존 모델 지표 `result.inference_ms`는 **772.6 ms**였다. 0.0은 사용한 clock 해상도 아래일 수 있으며
+  네트워크/모델 속도의 보장값이 아니다. 합성 입력 연결 회귀이며 정확도 benchmark가 아니다.
+- Swift/Xcode project reference 및 코드 정적 검토, 전체 diff / whitespace / public 파일 민감정보 검사를 수행했다.
+  실제 Swift 컴파일, 새 IPA, 실제 폰의 복구/latency/10~20분 안정성은 별도로 검증해야 한다.

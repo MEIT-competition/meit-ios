@@ -124,7 +124,7 @@ struct ContentView: View {
                 network.cancel()
             } else if phase == .active {
                 audio.refreshPermission()
-                if network.connectionStatus == "Connected" {
+                if network.hasConnected {
                     devices.connect(network: network, audio: audio, haptics: haptics)
                 }
             }
@@ -143,7 +143,7 @@ struct ContentView: View {
                     .disabled(network.isBusy)
                 Text(": 8765")
             }
-            Text("Connection: \(network.connectionStatus)")
+            Text("Last manual request: \(network.connectionStatus)")
             Button("Test Connection") { network.testConnection() }
                 .disabled(network.isBusy)
             Button("Send Snapshot") { network.sendSnapshot(from: audio) }
@@ -200,6 +200,69 @@ struct ContentView: View {
                 Text("Direction: \(event.direction.uppercased())")
             }
             if let message = devices.autoMessage { Text(message).font(.caption) }
+            automaticDiagnostics
+        }
+    }
+
+    private func diagnosticValue(_ label: String, _ value: Double?, unit: String = "ms") -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value.map { String(format: "%.1f %@", $0, unit) } ?? "—")
+                .monospacedDigit()
+        }
+        .font(.caption)
+    }
+
+    private var automaticDiagnostics: some View {
+        DisclosureGroup("Diagnostics") {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Server (poll): \(devices.pollingStatus == "Active" ? "Connected" : devices.pollingStatus)")
+                    Text("Registration: \(devices.registration)")
+                    Text("RMS reporting: \(devices.rmsStatus)")
+                    Text("Command polling: \(devices.pollingStatus)")
+                    Text("Auto control: \(devices.autoStatus == nil ? "Unavailable" : "Synced")")
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        diagnosticValue("Last successful contact", devices.lastSuccessfulContactUptime.map {
+                            max(0, ProcessInfo.processInfo.systemUptime - $0)
+                        }, unit: "s ago")
+                    }
+                    if let error = devices.lastNetworkError { Text("Last network error: \(error)").foregroundStyle(.red) }
+                }
+                .font(.caption)
+                if let status = devices.autoStatus {
+                    VStack(alignment: .leading, spacing: 4) {
+                        diagnosticValue("Current local RMS", audio.rmsDBFS, unit: "dBFS")
+                        diagnosticValue("Trigger", status.trigger_dbfs, unit: "dBFS")
+                        diagnosticValue("Rearm below", status.release_dbfs, unit: "dBFS")
+                        diagnosticValue("Cooldown remaining", status.cooldown_remaining_ms)
+                        Text("Armed: \(status.armed ? "yes" : "no") / Waiting for quiet: \(status.waiting_for_quiet == true ? "yes" : "no")")
+                        diagnosticValue("Quiet observed", status.quiet_elapsed_ms)
+                        diagnosticValue("Quiet required", status.rearm_quiet_ms)
+                    }
+                    .font(.caption)
+                    if let event = status.active_event ?? status.last_event {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Event: \(event.event_id.prefix(8)) / Source: \(event.source_role.uppercased())")
+                            diagnosticValue("Trigger RMS", event.trigger_rms_dbfs, unit: "dBFS")
+                            Text("Reason: \(event.trigger_reason ?? "Unavailable")")
+                            Text("Timestamps: ms since this bridge started")
+                            ForEach(["triggered", "snapshot_requested", "snapshot_received", "inference_started", "inference_completed"], id: \.self) { key in
+                                diagnosticValue(key.replacingOccurrences(of: "_", with: " "), event.timestamps_ms?[key])
+                            }
+                            if let timing = event.latency {
+                                diagnosticValue("Trigger → command queued", timing.trigger_to_command_ms)
+                                diagnosticValue("Command queued → audio received", timing.command_to_audio_ms)
+                                diagnosticValue("Audio → inference start", timing.audio_to_inference_start_ms)
+                                diagnosticValue("Inference (server)", timing.inference_ms)
+                                diagnosticValue("Total event", timing.total_event_ms)
+                            }
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
         }
     }
 

@@ -52,13 +52,31 @@ private struct PollResponse: Decodable {
 }
 
 struct AutoDetectionStatus: Decodable {
+    struct Latency: Decodable {
+        let trigger_to_command_ms: Double?
+        let command_to_audio_ms: Double?
+        let audio_to_inference_start_ms: Double?
+        let inference_ms: Double?
+        let total_event_ms: Double?
+    }
     struct Event: Decodable {
         let event_id: String
         let source_role: String
         let outcome: String
         let direction: String
         let result: AIInferenceResult?
+        let trigger_rms_dbfs: Double?
+        let trigger_threshold_dbfs: Double?
+        let trigger_reason: String?
+        let timestamps_ms: [String: Double]?
+        let latency: Latency?
     }
+    let trigger_dbfs: Double?
+    let release_dbfs: Double?
+    let rearm_quiet_ms: Double?
+    let quiet_elapsed_ms: Double?
+    let cooldown_remaining_ms: Double?
+    let waiting_for_quiet: Bool?
     let enabled: Bool
     let state: String
     let armed: Bool
@@ -97,6 +115,9 @@ final class DeviceCoordinator: ObservableObject {
     @Published private(set) var changingAuto = false
     @Published private(set) var sendingAuto = false
     @Published private(set) var autoMessage: String?
+    @Published private(set) var pollingStatus = "Stopped"
+    @Published private(set) var lastSuccessfulContactUptime: TimeInterval?
+    @Published private(set) var lastNetworkError: String?
 
     private let defaults: UserDefaults
     private weak var network: NetworkManager?
@@ -131,6 +152,7 @@ final class DeviceCoordinator: ObservableObject {
         let id = UUID()
         generation = id
         registration = "Registering..."
+        pollingStatus = "Connecting..."
         pollTask = Task { [weak self] in
             guard let self else { return }
             await pollLoop(id: id)
@@ -162,9 +184,16 @@ final class DeviceCoordinator: ObservableObject {
         registration = "Disconnected"
         direction = nil
         networkError = nil
+        pollingStatus = "Stopped"
+        lastSuccessfulContactUptime = nil
+        lastNetworkError = nil
         rmsStatus = "Stopped"
         testingDirection = false
         testResult = nil
+    }
+
+    private func recordContact() {
+        lastSuccessfulContactUptime = ProcessInfo.processInfo.systemUptime
     }
 
     private func current(_ id: UUID) -> Bool { generation == id && !Task.isCancelled }
@@ -187,6 +216,7 @@ final class DeviceCoordinator: ObservableObject {
                     }
                     isRegistered = true
                     registration = "Connected"
+                    recordContact()
                 }
                 let query = [URLQueryItem(name: "device_id", value: deviceID),
                              URLQueryItem(name: "role", value: role.rawValue)]
@@ -195,6 +225,8 @@ final class DeviceCoordinator: ObservableObject {
                 guard current(id) else { return }
                 let response = try JSONDecoder().decode(PollResponse.self, from: data)
                 direction = response.direction
+                pollingStatus = "Active"
+                recordContact()
                 autoStatus = response.auto
                 if response.auto?.enabled != true { cancelAutomaticSnapshot() }
                 networkError = nil
@@ -226,6 +258,8 @@ final class DeviceCoordinator: ObservableObject {
                 autoStatus = nil
                 direction = nil
                 networkError = error.localizedDescription
+                lastNetworkError = error.localizedDescription
+                pollingStatus = "Retrying"
                 delay = .seconds(1)
             }
             do { try await Task.sleep(until: began.advanced(by: delay), clock: clock) }
@@ -251,10 +285,12 @@ final class DeviceCoordinator: ObservableObject {
                     guard try JSONDecoder().decode(Ack.self, from: data).status == "ok" else {
                         throw URLError(.cannotParseResponse)
                     }
+                    recordContact()
                     rmsStatus = "Reporting (~10 Hz)"
                 } catch {
                     guard current(id) else { return }
                     rmsStatus = "Report failed: \(error.localizedDescription)"
+                    lastNetworkError = error.localizedDescription
                 }
             } else {
                 rmsStatus = isRegistered ? "Capture stopped" : "Waiting for registration"
@@ -284,9 +320,11 @@ final class DeviceCoordinator: ObservableObject {
                     path: enabled ? "/auto/start" : "/auto/stop", body: Data("{}".utf8))
                 guard current(id) else { return }
                 autoStatus = try JSONDecoder().decode(AutoDetectionStatus.self, from: data)
+                recordContact()
             } catch {
                 guard current(id) else { return }
                 autoMessage = error.localizedDescription
+                lastNetworkError = error.localizedDescription
             }
             guard current(id) else { return }
             changingAuto = false
@@ -323,10 +361,12 @@ final class DeviceCoordinator: ObservableObject {
                 }
                 try await network.sendAutomaticSnapshot(snapshot, eventID: eventID, deviceID: deviceID, role: sourceRole)
                 guard current(id), autoSnapshotID == operationID else { return }
+                recordContact()
                 autoMessage = "Automatic snapshot processed."
             } catch {
                 guard current(id), autoSnapshotID == operationID else { return }
                 autoMessage = "Auto snapshot: \(error.localizedDescription)"
+                if !(error is CancellationError) { lastNetworkError = error.localizedDescription }
             }
             guard current(id), autoSnapshotID == operationID else { return }
             autoSnapshotID = nil
