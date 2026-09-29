@@ -90,13 +90,10 @@
 "developer.lastRequest" = "최근 수동 요청";
 "hardware.wearable" = "웨어러블";
 "hardware.pending" = "하드웨어 연동은 현재 준비 중입니다.";
-"hardware.description" = "iPhone을 백업 마이크로 사용할 수 있습니다. 알림은 웨어러블에서 전달하며, 이 모드에서 iPhone은 진동하지 않습니다.";
+"hardware.description" = "웨어러블 모드는 iPhone 마이크로 소리를 수음합니다. 웨어러블 알림은 아직 연결되지 않았습니다.";
 
-/* Wearable backup input: local capture and experimental direction only. */
+/* Wearable mode iPhone input: local capture and experimental channel diagnostics. */
 "wearable.audioInput" = "오디오 입력";
-"wearable.backupInput" = "iPhone 마이크 · 백업";
-"wearable.primaryInput" = "웨어러블 마이크";
-"wearable.useMicrophone" = "iPhone 마이크 사용";
 "wearable.stereoInput" = "스테레오 입력";
 "wearable.available" = "사용 가능";
 "wearable.unavailable" = "사용 불가";
@@ -127,7 +124,7 @@
 "wearable.logicalMapping" = "채널의 실제 방향 매핑";
 "wearable.mappingUnverified" = "현재 장착 방향에서 검증되지 않았습니다. 어느 채널도 실제 왼쪽이나 오른쪽으로 지정하지 않았습니다.";
 "wearable.testInstructions" = "현재 장착 방향에서 좌우 박수와 말소리, 정면 소리, 조용한 상태를 비교하고 어느 채널이 상승하는지 확인하세요. 균형은 두 레벨이 비슷하다는 뜻이며 실제 정면 위치를 보장하지 않습니다.";
-"wearable.aiReady" = "AI 입력 스냅샷 준비 상태";
+"wearable.aiReady" = "PCM 버퍼 준비 상태";
 "wearable.ready" = "준비됨";
 "wearable.notReady" = "준비되지 않음";
 "wearable.localOnly" = "오디오 버퍼는 이 iPhone 안에서만 유지됩니다. AI 전송과 웨어러블 모터 출력은 아직 연결되지 않았습니다.";
@@ -137,3 +134,8 @@
 "wearable.dominance.channel2Dominant" = "채널 2 우세";
 "wearable.dominance.balanced" = "균형";
 "wearable.dominance.unavailable" = "사용 불가";
+"wearable.iPhoneMicrophone" = "iPhone 마이크";
+"wearable.aiServer" = "AI 서버";
+"wearable.waiting" = "대기 중";
+"wearable.startHint" = "iPhone 마이크 수음을 시작합니다. 오디오는 이 iPhone 안에서만 유지됩니다.";
+"wearable.stopHint" = "마이크 수음을 중지하고 로컬 오디오 버퍼를 초기화합니다.";

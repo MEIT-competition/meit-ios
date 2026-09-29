@@ -90,13 +90,10 @@
 "developer.lastRequest" = "Last manual request";
 "hardware.wearable" = "wearable";
 "hardware.pending" = "Hardware integration is currently in development.";
-"hardware.description" = "Use your iPhone as a backup microphone. Alerts belong to the wearable; your iPhone does not vibrate in this mode.";
+"hardware.description" = "Your iPhone is the microphone in wearable mode. Wearable alerts are not connected yet.";
 
-/* Wearable backup input: local capture and experimental direction only. */
+/* Wearable mode iPhone input: local capture and experimental channel diagnostics. */
 "wearable.audioInput" = "audio input";
-"wearable.backupInput" = "iPhone microphone · backup";
-"wearable.primaryInput" = "wearable microphones";
-"wearable.useMicrophone" = "use iPhone microphone";
 "wearable.stereoInput" = "stereo input";
 "wearable.available" = "available";
 "wearable.unavailable" = "unavailable";
@@ -127,7 +124,7 @@
 "wearable.logicalMapping" = "physical channel mapping";
 "wearable.mappingUnverified" = "Not verified for the current mounting orientation. Neither channel is assigned to physical left or right.";
 "wearable.testInstructions" = "Compare left/right claps and speech, a sound in front, and quiet at the current mounting orientation. Note which channel rises. Balanced means similar levels, not a confirmed front location.";
-"wearable.aiReady" = "AI input snapshot ready";
+"wearable.aiReady" = "PCM buffer ready";
 "wearable.ready" = "ready";
 "wearable.notReady" = "not ready";
 "wearable.localOnly" = "The audio buffer stays on this iPhone. AI uploads and wearable motor output are not connected.";
@@ -137,3 +134,8 @@
 "wearable.dominance.channel2Dominant" = "channel 2 dominant";
 "wearable.dominance.balanced" = "balanced";
 "wearable.dominance.unavailable" = "unavailable";
+"wearable.iPhoneMicrophone" = "iPhone microphone";
+"wearable.aiServer" = "AI server";
+"wearable.waiting" = "waiting";
+"wearable.startHint" = "Starts the iPhone microphone. Audio stays on this iPhone.";
+"wearable.stopHint" = "Stops the microphone and clears the local audio buffer.";

@@ -7,7 +7,7 @@ struct StereoDirectionConfiguration: Sendable {
     var smoothingAlpha = 0.25
 }
 
-enum WearableBackupDirection: String, Sendable {
+enum WearableDirection: String, Sendable {
     case left, right, center, unavailable
 
     var localizationKey: String { "wearable.direction.\(rawValue)" }
@@ -28,7 +28,7 @@ struct StereoDirectionEstimator {
         smoothedRight = nil
     }
 
-    mutating func update(leftRMS: Double, rightRMS: Double, stereoUsable: Bool) -> WearableBackupDirection {
+    mutating func update(leftRMS: Double, rightRMS: Double, stereoUsable: Bool) -> WearableDirection {
         guard stereoUsable, Self.valid(leftRMS), Self.valid(rightRMS),
               configuration.smoothingAlpha.isFinite,
               (0...1).contains(configuration.smoothingAlpha), configuration.smoothingAlpha > 0,
@@ -46,7 +46,7 @@ struct StereoDirectionEstimator {
     }
 
     static func classify(leftRMS: Double, rightRMS: Double,
-                         configuration: StereoDirectionConfiguration = .init()) -> WearableBackupDirection {
+                         configuration: StereoDirectionConfiguration = .init()) -> WearableDirection {
         guard valid(leftRMS), valid(rightRMS), configuration.marginDB.isFinite,
               configuration.marginDB > 0, configuration.silenceDBFS.isFinite,
               configuration.silenceDBFS < 0 else { return .unavailable }

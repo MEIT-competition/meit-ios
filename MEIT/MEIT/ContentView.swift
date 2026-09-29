@@ -10,8 +10,8 @@ struct ContentView: View {
     @AppStorage("meit.operatingMode") private var operatingMode: OperatingMode = .hardware
     @AppStorage("meit.language") private var language: AppLanguage = .english
     @State private var startCaptureTask: Task<Void, Never>?
-    @State private var backupCaptureTask: Task<Void, Never>?
-    @State private var backupRequestID: UUID?
+    @State private var wearableCaptureTask: Task<Void, Never>?
+    @State private var wearableRequestID: UUID?
     @State private var modeGeneration = UUID()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -30,8 +30,8 @@ struct ContentView: View {
 
                 switch operatingMode {
                 case .hardware:
-                    HardwareModeView(audio: audio, backupEnabled: Binding(
-                        get: { backupRequestID != nil }, set: setBackupMicrophone))
+                    HardwareModeView(audio: audio, isCaptureRequested: wearableRequestID != nil,
+                                     onStartCapture: startWearableCapture, onStopCapture: stopWearableCapture)
                 case .fallback:
                     FallbackModeView(audio: audio, network: network, devices: devices, haptics: haptics,
                                      operatingMode: $operatingMode, onStartCapture: startCapture,
@@ -47,11 +47,11 @@ struct ContentView: View {
         .environment(\.appLanguage, language)
         .environment(\.locale, language.locale)
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { stopBackupMicrophone() }
+            if phase == .background { stopWearableCapture() }
             else if phase == .active, operatingMode == .hardware { audio.refreshPermission() }
         }
         .onChange(of: audio.captureOwner) { _, owner in
-            if owner == .none, audio.captureOwner == .none, backupCaptureTask == nil { stopBackupMicrophone() }
+            if owner == .none, audio.captureOwner == .none, wearableCaptureTask == nil { stopWearableCapture() }
         }
     }
 
@@ -60,7 +60,7 @@ struct ContentView: View {
             guard next != operatingMode else { return }
             // Stop before rendering the next mode; invalidate cleanup closures from the old screen.
             if next == .hardware { deactivateFallback() }
-            else { stopBackupMicrophone() }
+            else { stopWearableCapture() }
             modeGeneration = UUID()
             operatingMode = next
         })
@@ -85,27 +85,26 @@ struct ContentView: View {
         audio.stopCapture(owner: .iphoneMode)
     }
 
-    private func setBackupMicrophone(_ enabled: Bool) {
-        if !enabled { stopBackupMicrophone(); return }
+    private func startWearableCapture() {
         guard operatingMode == .hardware, scenePhase == .active,
-              backupRequestID == nil, !audio.isCapturing, !audio.isStarting else { return }
+              wearableRequestID == nil, !audio.isCapturing, !audio.isStarting else { return }
         let id = UUID()
-        backupRequestID = id
-        backupCaptureTask = Task {
-            guard !Task.isCancelled, backupRequestID == id,
+        wearableRequestID = id
+        wearableCaptureTask = Task {
+            guard !Task.isCancelled, wearableRequestID == id,
                   operatingMode == .hardware, scenePhase == .active else { return }
-            await audio.startCapture(owner: .wearableBackup)
-            guard backupRequestID == id else { return }
-            if !audio.isCapturing || audio.captureOwner != .wearableBackup { stopBackupMicrophone() }
-            backupCaptureTask = nil
+            await audio.startCapture(owner: .wearableMode)
+            guard wearableRequestID == id else { return }
+            if !audio.isCapturing || audio.captureOwner != .wearableMode { stopWearableCapture() }
+            wearableCaptureTask = nil
         }
     }
 
-    private func stopBackupMicrophone() {
-        backupRequestID = nil
-        backupCaptureTask?.cancel()
-        backupCaptureTask = nil
-        audio.stopCapture(owner: .wearableBackup)
+    private func stopWearableCapture() {
+        wearableRequestID = nil
+        wearableCaptureTask?.cancel()
+        wearableCaptureTask = nil
+        audio.stopCapture(owner: .wearableMode)
     }
 
     private func deactivateFallback() {

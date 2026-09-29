@@ -18,68 +18,112 @@ Phase 6B: **Four-iPhone calibration and final integration — pending devices** 
 
 Phase 0–3, Phase 4 system vibration, Phase 5 단일 iPhone 자동 실행 결과는 사용자 확인에 근거한다.
 
-`meit-ios`는 `meit-ee`의 ESP32 하드웨어 경로에 대비하는 iOS fallback 프로젝트다.
-장기적으로 여러 iPhone 15/16을 마이크 입력 및 haptic 출력 장치로 사용하고,
-Windows 노트북의 기존 `meit-ai` 위험음 분류 모델과 연결할 예정이다.
-현재 앱은 실제 입력의 RMS(dBFS)와 변환된 AI 입력 버퍼의 규격·준비 상태를 표시한다.
-Phase 3에서는 수동 HTTP snapshot 전송과 기존 meit-ai 결과 표시를 추가한다.
-Phase 4에서는 네 역할의 RMS 보고·방향 추정과 해당 iPhone 진동을 추가한다.
-Phase 5에서는 bridge가 자동 이벤트와 단일 audio source를 선택한다. TDoA와 녹음 파일 저장은 구현하지 않는다.
+## 두 Operating Mode의 최종 구조
 
-## Wearable backup microphone — Stages 2–6
+두 모드 모두 **iPhone 자체 마이크가 기본 입력**이다. 차이는 최종 알림 출력 경로다.
+ESP32의 I2S/INMP441 마이크 입력은 사용하지 않는다. 위 Phase 0–6B 표는 기존 iPhone mode 구현/검증 이력이다.
 
-구현됨 / **Xcode 빌드 및 실제 iPhone 검증 대기**. 기존 iPhone mode는 유지하며,
-wearable mode 안에 로컬 백업 입력만 추가한다. ESP32/BLE 및 AI 전송은 아직 연결하지 않는다.
+| 모드 | 목표 경로 | 이번 patch의 실제 구현 범위 |
+|---|---|---|
+| wearable mode / 웨어러블 모드 | iPhone mic → Wi-Fi → laptop / meit-ai → laptop → ESP32 → DRV8833 → wearable motors | 로컬 microphone / RMS / AI PCM buffer / stereo diagnostics까지만 구현 |
+| iPhone mode / iPhone 모드 | iPhone mic → laptop / meit-ai → multi-iPhone direction → target iPhone vibration | 기존 inference / 자동 감지 / coordination / 진동 경로 유지 |
 
-- 표시 이름: `wearable mode / 웨어러블 모드`, `iPhone mode / iPhone 모드`.
-  내부 `hardware` / `fallback`, 저장 key와 protocol은 유지한다.
-- `use iPhone microphone / iPhone 마이크 사용` ON은 루트가 소유한 단일 AudioCaptureManager를
-  `wearableBackup` 소유자로 시작한다. OFF·모드 전환·background는 해당 소유자의 캡처만 정리한다.
-  권한/오디오 callback은 capture ID, 이전 화면의 cleanup은 mode generation으로 차단한다.
-- 기존 native tap, 4-slot worker, 16 kHz mono PCM16LE 변환과 2.5초 snapshot을 재사용한다.
-  **`/infer`, `/event/audio`, device registration/RMS reporting/command polling을 백업에서 호출하지 않는다.**
-  기존 `/infer`는 다른 iPhone 진동을 예약할 수 있으므로 백업 추론에 사용하면 안 된다.
-- stereo 설정은 내장 입력과 지원 data source에서만 요청한다. 사용 가능 판정에는 선택된 stereo
-  polar pattern, session/node/buffer 각각 2 channels가 필요하다. orientation은 별도 진단/매핑 값이다.
-  요청 성공만으로 stereo usable을 표시하지 않는다. mono는 정상 fallback이며 AI buffer는 계속 준비한다.
-- stereo일 때 기존 tap의 약 100 ms window에서 채널별 RMS와 absolute peak를 읽는다.
-  planar/interleaved stride를 존중하고, callback에서 UI/session/network를 처리하지 않는다.
-- 방향은 linear RMS EMA(alpha=0.25) 후 `20*log10(L) - 20*log10(R)`를 비교한다.
-  초기 실험 상수는 margin=3 dB, silence=-65 dBFS이며 실기기 보정값이 아니다.
-  양쪽이 silence 이하이거나 invalid/mono이면 즉시 UNAVAILABLE 및 smoothing reset.
-  margin과 정확히 같은 차이는 balanced. 이 계산 결과는 channel dominance이며 기존 bridge/AI threshold에는 영향을 주지 않는다.
-- 진단은 channel 1/2 RMS/peak, route, source, 최대/실제 session/node/buffer 채널 수,
-  지원/선택 polar pattern, 요청/실제 orientation, AI buffer ready를 표시한다.
-  진단에는 channel 1 dominant / channel 2 dominant / balanced / unavailable을 표시한다.
-  **물리적 좌우 미검증** 상태에서 UI 및 adapter용 direction은 항상 UNAVAILABLE이다.
-  balanced는 실제 정면을 확정하지 않는다. ESP32 TDoA나 multi-iPhone 방향을 대체하지 않는다.
-- 백업이 바꾼 session preference만 복원한다. 원래 channel preference가 0이면 API가 0을 거부하므로
-  시작 전 실제 채널 수를 복원한다. 복원 실패는 보관/표시하고 다음 capture 전에 재시도한다.
-  복원이 계속 실패하면 기존 iPhone mode를 오염된 설정으로 시작하지 않는다.
-- 향후 adapter는 `audio.wearableBackup` published 값의 `direction`(현재 항상 UNAVAILABLE), `channelDominance`, `audioReady`,
-  `stereoUsable`, `physicalMappingVerified`를 관측할 수 있다. 물리적 매핑은 현재 항상 false다.
-  원본 PCM 전송이나 가짜 AI 결과/모터 연결 상태를 만들지 않는다.
+**Wearable mode의 laptop AI 전송과 모터 출력은 아직 구현되지 않았다.**
+ESP32 통신 주체는 Windows laptop bridge다. iOS에 CoreBluetooth, BLE central, ESP32 UUID,
+모터 packet 또는 iPhone→ESP32 직접 전송을 구현하지 않는다.
 
-### 이번 변경의 실제 iPhone 검증
+TODO — 이후 별도 단계에서 구현할 경로:
 
-1. GitHub Actions 수동 빌드 후 unsigned IPA를 별도로 서명/설치한다.
-2. 한/영 모드 이름과 기존 About/footer를 확인한다. Wearable 상태는 아직 not connected여야 한다.
-3. 백업 ON → 권한 허용 → live audio와 40,000 samples AI buffer ready를 확인한다.
-   Windows 서버가 없어도 가능하며, 백업 조작으로 HTTP 요청이나 iPhone 진동이 발생하면 안 된다.
-4. Diagnostics에서 session/node/buffer 실제 채널 수와 stereo usable을 확인한다.
-   mono는 channel 1/2 수치가 비어 있고 direction unavailable, AI buffer ready여야 한다.
-5. stereo이면 현재 장착 orientation에서 좌우 박수·좌우 말소리·정면·조용한 상태를 비교한다.
-   data source와 orientation을 함께 기록해 실제 좌우 분리를 검증한다. 오디오 파일은 저장하지 않는다.
-6. 백업 OFF → 수음 정지, channel/direction/buffer 상태 초기화를 확인한다.
-7. Wearable → iPhone → Start → 기존 자동/수동 추론·multi-iPhone coordination·진동을 확인한다.
-   iPhone → Wearable → 백업 ON 및 빠른 왕복, 권한 대기 중 OFF/전환, background/foreground,
-   입력 route 변경/오디오 interruption도 검사한다. 복귀 후 마이크는 사용자 동작으로 시작한다.
-8. Stereo 설정 복원 실패는 오류로 보이며, 다음 시작에서 재시도해야 한다.
+```text
+wearable mode iPhone audio
+→ side-effect-free laptop inference
+→ laptop → ESP32 command transport
+→ DRV8833 / wearable motor output
+```
 
-### Pure Swift estimator tests
+기존 `POST /infer`는 `coordination.after_inference()`를 통해 다른 iPhone에 `direction_haptic`을
+예약할 수 있다. 따라서 wearable mode는 `/infer`와 `/event/audio`를 호출하지 않는다.
+이번 patch는 Python bridge와 기존 `meit-ai`를 변경하지 않는다.
 
-Swift compiler가 있는 환경에서 repository 루트를 기준으로 production source와 테스트를 함께 컴파일한다.
-테스트 실행 파일은 임시 디렉터리에 만들고 Git에는 추가하지 않는다. iOS SDK/추가 dependency는 필요 없다.
+## Wearable mode iPhone microphone
+
+로컬 입력과 진단 구현됨 / **이번 patch의 Xcode 빌드 및 실제 iPhone 검증 대기**.
+
+- 입력은 항상 `iPhone microphone / iPhone 마이크`다. 입력 선택 toggle은 없다.
+  `start listening / 감지 시작`과 `stop listening / 감지 중지`로 캡처를 시작/종료한다.
+  앱 진입이나 foreground 복귀만으로 마이크를 자동 시작하지 않는다.
+- 메인은 listening/waiting, 실제 live audio RMS meter, AI server / wearable 미연결 상태,
+  direction unavailable, 시작/중지 action과 diagnostics를 표시한다.
+  Wearable용 transport가 없으므로 AI server와 wearable은 모두 not connected다.
+  iPhone mode에서 과거 성공한 health check를 Wearable 연결 성공으로 표시하지 않는다.
+- `ContentView`가 기존 `AudioCaptureManager` 한 개를 소유한다.
+  Capture ownership은 `none / iphoneMode / wearableMode`다. engine과 input tap도 기존 한 경로만 사용한다.
+  `captureID`, wearable request ID, mode generation, 늦은 callback 무효화와 소유자별 정리를 유지한다.
+- 내부 `OperatingMode.hardware / fallback`, `meit.operatingMode`, role/UUID 저장 key와 network protocol은 유지한다.
+  `WearableMicState`, `audio.wearableMic`, `WearableDirection`은 최근 추가한 wearable 입력 상태의 새 이름이다.
+- 기존 native input → 4-slot worker → 16 kHz mono PCM16LE → 2.5초 ring/snapshot을 재사용한다.
+  **40,000 samples / 80,000 bytes / 2.5 sec**, PCM buffer ready까지 로컬에서 준비한다.
+  Wearable에서는 registration, RMS reporting, command polling, AI upload, iPhone 진동을 시작하지 않는다.
+- 내장 입력의 stereo source/polar pattern을 요청하며, 실제 session/node/buffer가 모두 2채널이어야
+  stereoUsable이다. orientation은 별도 diagnostics/물리 mapping 정보로 유지한다.
+  Mono는 정상 입력이며 AI용 mono PCM 준비는 계속된다.
+- 실제 stereo일 때 기존 tap의 약 100 ms window에서 channel 1/2 RMS와 absolute peak를 계산한다.
+  planar/interleaved stride와 기존 aggregate RMS/live meter를 유지하며 별도 DSP pipeline을 추가하지 않는다.
+- `StereoDirectionEstimator`의 linear RMS EMA(alpha=0.25), dB difference, margin=3 dB,
+  silence=-65 dBFS는 그대로다. 실기기 보정값이 아닌 실험 기본값이며 기존 AI threshold와 무관하다.
+  진단용 출력은 channel 1 dominant / channel 2 dominant / balanced / unavailable이다.
+  무음·invalid·mono에서 unavailable 및 smoothing reset, margin과 같은 차이는 balanced다.
+- `stereoUsable != physicalMappingVerified`. 물리 mapping은 현재 항상 false이며,
+  **user-facing direction과 상태의 direction은 항상 UNAVAILABLE**이다.
+  Balanced는 실제 정면을 의미하지 않는다. 실제 좌우 매핑을 추측하지 않는다.
+- Diagnostics는 iPhone 입력 label, route, session/node/buffer channels, stereo usable,
+  channel 1/2 RMS·peak, channel dominance, polar patterns/orientation, physical mapping,
+  PCM buffer ready 및 오류를 표시한다.
+- `audio.wearableMic`의 `direction`, `channelDominance`, `audioReady`, `stereoUsable`,
+  `physicalMappingVerified`는 향후 **iOS→laptop metadata/state**로 활용할 수 있다.
+  실제 transport는 없으며 iPhone→ESP32 direct adapter용 상태로 취급하지 않는다.
+- Wearable 캡처가 변경한 session preference는 종료 시 복원한다. 원래 preferred channel 수가 0이면
+  API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 실패하면 표시하고 다음 시작 전에 재시도한다.
+  기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
+
+### Mode lifecycle
+
+- iPhone → Wearable: 기존 capture/Start 작업, 수동 요청, 자동 snapshot/upload, registration/RMS/polling,
+  후속 진동을 기존 방식으로 정리한다. 서버 전역 Auto 설정이나 주소·role·UUID를 변경하지 않는다.
+- Wearable → iPhone: wearableMode 소유 캡처와 요청을 정리하고 session preference를 복원한다.
+  이전 iPhone mode 연결 성공 주소가 있으면 기존 coordination 복구를 유지하되, 마이크는 Start가 필요하다.
+- Stop/background/입력 변경/권한 대기 중 전환에서도 capture ID와 mode generation을 통해
+  이전 작업이 새 모드의 캡처를 정지시키지 않도록 한다. Diagnostics 열기/닫기는 캡처를 소유하지 않는다.
+- 이미 서버가 수락한 추론이나 OS에 전달된 한 번의 진동은 기존과 동일하게 취소할 수 없다.
+
+### 실제 iPhone 검증
+
+1. GitHub Actions를 수동 실행해 unsigned IPA를 빌드하고 별도 서명/설치한다.
+2. 한/영에서 두 모드 이름과 iPhone microphone 기본 입력, 시작/중지 버튼을 확인한다.
+   첫 진입은 waiting이며 권한 요청/수음이 자동 시작되지 않아야 한다. 기존 About/footer는 그대로여야 한다.
+3. Wearable Start → 권한 → live audio 변화 → 40,000 samples / PCM ready를 확인한다.
+   Windows 서버 없이도 수음 가능하고, 이 동작으로 HTTP 요청이나 iPhone 진동이 발생하면 안 된다.
+4. Diagnostics의 실제 session/node/buffer 채널 수를 확인한다. Mono이면 channel 수치는 비어 있고
+   stereo unavailable / direction unavailable이어도 PCM ready는 가능해야 한다.
+5. Stereo이면 현재 장착 orientation에서 좌우 박수·말소리·정면·조용한 상태의 채널 우세도를 비교한다.
+   어느 채널이 상승하는지 data source/orientation과 함께 확인하되, physical direction은 계속 unavailable이다.
+6. Stop → RMS/채널/PCM 상태 초기화 → Start 반복, 권한 대기 중 Stop/전환, 빠른 모드 왕복,
+   background/foreground, route 변경/interruption, diagnostics 열기/닫기를 확인한다.
+7. iPhone mode로 돌아가 기존 Start/Stop, 수동/자동 inference, multi-iPhone RMS 방향,
+   target iPhone vibration, diagnostics/developer tools와 언어 변경이 정상인지 회귀 검사한다.
+   실제 네 iPhone 방향 및 최종 calibration은 기존 Phase 6B 검증 범위다.
+
+### 검증 범위와 Swift tests
+
+Windows에서 기존 Python 60개 테스트, localization parity, project references, 단일 manager/engine/tap,
+mode ownership/lifecycle, stale naming, 전체 diff와 민감정보 패턴을 검사한다.
+Windows 검증은 Xcode 컴파일 또는 실제 iPhone stereo/방향 정확도를 증명하지 않는다.
+
+`Tests/StereoDirectionEstimatorTests.swift`는 production pure Swift source 대상 standalone 테스트다.
+**로컬 Swift compiler가 없고 Xcode test target도 없으므로 이 환경과 현재 Actions에서는 실행되지 않는다.**
+기존 Actions workflow는 앱 build/unsigned IPA 패키징만 수행하며 변경하지 않는다.
+
+Swift compiler가 있는 환경에서는 iOS SDK나 third-party dependency 없이 실행할 수 있다:
 
 ```powershell
 $estimatorTest = Join-Path $env:TEMP 'meit-stereo-estimator-tests.exe'
@@ -87,69 +131,7 @@ swiftc MEIT/MEIT/Audio/StereoDirectionEstimator.swift Tests/StereoDirectionEstim
 if ($LASTEXITCODE -eq 0) { & $estimatorTest }
 ```
 
-macOS에서는 같은 두 source를 `swiftc ... -o /tmp/meit-stereo-tests`로 컴파일 후 실행할 수 있다.
-기존 GitHub Actions workflow는 변경하지 않는다. 현재 workflow는 앱 build/IPA 패키징만 수행하며,
-standalone Swift 테스트를 실행하지 않는다. Xcode 프로젝트에 별도 test target도 등록되어 있지 않다.
-
-이번 Windows 검증: 기존 Python **60 tests / OK (74.181초)**, 한/영 각 136 keys,
-Swift 17개 및 resource 2개 참조 검사 통과. 신규 pure Swift 테스트 소스는 추가했으나
-로컬 Swift compiler가 없어 실행하지 못했다. Xcode 컴파일 및 실제 iPhone 검증은 아직 미완료다.
-
-## Operating Modes
-
-하나의 앱에서 상단 segmented picker로 **wearable mode / iPhone mode** 운용 경로를 선택한다.
-
-| 모드 | 현재 범위 |
-|---|---|
-| Wearable Mode | local iPhone backup mic / experimental stereo implemented; meit-ee integration pending |
-| iPhone Mode | 기존 Phase 0–6A 구현과 진단 화면 유지 |
-
-- `OperatingMode`의 `hardware` / `fallback` 값을 `@AppStorage("meit.operatingMode")`로
-  UserDefaults에 저장한다. 첫 실행 기본값은 Hardware이며 이후 마지막 선택을 복원한다.
-- `ContentView`가 AudioCaptureManager, NetworkManager, DeviceCoordinator, HapticManager를
-  각각 하나의 `@StateObject`로 소유한다. Fallback은 같은 객체를 `@ObservedObject`로 받는다.
-- Fallback → Hardware 전환 시 capture 및 대기 중 Start/Check Snapshot 작업, 수동 요청,
-  자동 snapshot/upload, 등록·RMS 보고·command polling 및 후속 진동을 정리한다.
-  기존 capture/session ID 검사가 늦은 권한·네트워크 응답을 무효화한다.
-- 주소·role·UUID와 서버 설정을 삭제하지 않는다. 주소는 기존처럼 앱 세션 안에서 유지하고,
-  role·UUID는 기존 UserDefaults 저장을 유지한다. 다른 폰에도 영향을 주는 서버의 전역 Auto 설정은
-  변경하지 않는다. 이미 서버가 수락한 추론이나 OS에 전달된 한 번의 진동은 취소할 수 없다.
-- Hardware → Fallback 복귀 시 이전 연결 성공 주소가 있으면 coordination을 다시 연결한다.
-  마이크는 자동 시작하지 않으며 사용자가 **start listening**을 눌러야 한다.
-- Wearable 화면은 wearable / not connected와 integration 준비 중 안내, 선택적 iPhone 백업 마이크를 표시한다.
-  백업 PCM은 로컬에서만 준비한다. role·진동·AI 전송·ESP32/BLE 통신·모의 데이터는 사용하지 않는다.
-
-Wearable Mode TODO (이번 단계 미구현):
-
-- ESP32-S3 / meit-ee connection 및 hardware direction input
-- AI result synchronization
-- motor status 및 motor test command
-- system start/stop
-
-### 모드 분리 검증
-
-Windows에서 기존 bridge 테스트 **60개 통과**. 프로젝트 소스 참조·중복 등록, 객체 소유권,
-전환 정리 경로 및 전체 diff를 정적 검토했다. 이번 wearable backup은 공유 AudioCaptureManager에만
-캡처 소유자 및 백업 분석을 추가한다. 기존 converter/ring, Network/Haptics, Python bridge,
-기존 meit-ai, unsigned IPA workflow는 변경하지 않았다.
-기존 모드 전환과 Fallback의 실제 iPhone 동작은 사용자 확인으로 검증되었다.
-**이번 UI redesign은 새 GitHub Actions 빌드와 실제 iPhone 검증이 필요하다.**
-
-1. 기존 GitHub Actions를 수동 실행해 Modes의 Swift 파일 컴파일, 링크 및 unsigned IPA 생성을 확인한다.
-2. 새 IPA 설치 후 저장된 선택이 없으면 Wearable인지, 미연결 표시와 백업 마이크 toggle이 OFF인지 확인한다.
-   toggle OFF 상태에서는 마이크 권한 요청·capture가 없어야 하며, Wearable에서는 RMS 보고·command polling이 없어야 한다.
-3. Fallback을 선택하고 아래 Phase 1–6A 및 bridge 문서의 기존 테스트를 수행한다.
-   Start → Buffer Ready, 수동 inference, Auto, registration/RMS, 진동, Diagnostics를 확인한다.
-4. capture/Check Snapshot/수동 업로드/자동 업로드/진동 중 각각 Hardware로 전환한다.
-   마이크와 반복 요청이 멈추고 이후 진동 burst가 이어지지 않는지 확인한다.
-   Start 직후 전환, 빠른 반복 전환, 권한 요청 후 복귀·전환도 검사한다.
-5. Fallback 복귀 시 주소·role·UUID가 유지되고 capture는 정지 상태인지 확인한다.
-   Start를 눌러 새 buffer가 채워지고 연결·Auto·수동 요청이 정상 복구되는지 확인한다.
-6. 두 모드 각각에서 앱 종료·재실행 시 마지막 선택을 복원하는지 확인한다.
-   background/foreground 및 10~20분 Fallback 안정성 테스트도 수행한다.
-
-Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A single-iPhone stabilization의
-실기기 검증과 Phase 6B four-iPhone final calibration도 기존 대기 상태를 유지한다.
+macOS에서도 같은 두 source를 `swiftc ... -o /tmp/meit-stereo-tests`로 컴파일해 실행한다.
 
 ## UI & branding
 

@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class AudioCaptureManager: ObservableObject {
     enum CaptureOwner: Equatable {
-        case none, iphoneMode, wearableBackup
+        case none, iphoneMode, wearableMode
     }
 
     enum MicrophonePermission: String {
@@ -15,7 +15,7 @@ final class AudioCaptureManager: ObservableObject {
     }
 
     @Published private(set) var captureOwner: CaptureOwner = .none
-    @Published private(set) var wearableBackup = WearableBackupState()
+    @Published private(set) var wearableMic = WearableMicState()
     @Published private(set) var isCapturing = false
     @Published private(set) var isStarting = false
     @Published private(set) var rmsDBFS = -100.0
@@ -33,9 +33,9 @@ final class AudioCaptureManager: ObservableObject {
     private var aiProcessor: AIInputProcessor?
     private var aiStatusTask: Task<Void, Never>?
     private var snapshotPending = false
-    private var backupPreferences: WearableAudioPreferences?
-    private var backupEstimator = StereoDirectionEstimator()
-    private var backupRouteSignature: String?
+    private var wearablePreferences: WearableAudioPreferences?
+    private var wearableEstimator = StereoDirectionEstimator()
+    private var wearableRouteSignature: String?
     private var engineObserver: AnyCancellable?
     private var sessionObservers = Set<AnyCancellable>()
 
@@ -100,19 +100,19 @@ final class AudioCaptureManager: ObservableObject {
             sessionActive = true
             guard session.isInputAvailable else { throw CaptureError.unavailableInput }
             // A failed previous restoration must be resolved before either mode can capture.
-            try restoreBackupPreferences()
-            if owner == .wearableBackup {
-                wearableBackup = .init()
-                backupEstimator.reset()
-                backupPreferences = WearableAudioPreferences(session: session)
-                guard let preferences = backupPreferences else { throw CaptureError.unavailableInput }
+            try restoreWearablePreferences()
+            if owner == .wearableMode {
+                wearableMic = .init()
+                wearableEstimator.reset()
+                wearablePreferences = WearableAudioPreferences(session: session)
+                guard let preferences = wearablePreferences else { throw CaptureError.unavailableInput }
                 do { try preferences.requestStereo(session) }
                 catch {
                     // A stereo request failure is not a mono capture failure. Undo partial requests.
-                    wearableBackup.configurationNote = error.localizedDescription
-                    try restoreBackupPreferences()
+                    wearableMic.configurationNote = error.localizedDescription
+                    try restoreWearablePreferences()
                 }
-                // The backup action must not silently capture an external headset microphone.
+                // Wearable mode uses the built-in iPhone microphone, not an external headset.
                 guard session.currentRoute.inputs.first?.portType == .builtInMic else {
                     throw CaptureError.unavailableInput
                 }
@@ -128,11 +128,11 @@ final class AudioCaptureManager: ObservableObject {
                 throw CaptureError.unavailableInput
             }
 
-            if owner == .wearableBackup {
-                let note = wearableBackup.configurationNote
-                wearableBackup = .inspect(session, nodeChannels: Int(format.channelCount))
-                wearableBackup.configurationNote = note
-                backupRouteSignature = currentBackupRouteSignature()
+            if owner == .wearableMode {
+                let note = wearableMic.configurationNote
+                wearableMic = .inspect(session, nodeChannels: Int(format.channelCount))
+                wearableMic.configurationNote = note
+                wearableRouteSignature = currentWearableRouteSignature()
             }
 
             let processor = try AIInputProcessor(nativeFormat: format) { [weak self] message in
@@ -143,10 +143,10 @@ final class AudioCaptureManager: ObservableObject {
             }
             aiProcessor = processor
             // Build the audio callback outside MainActor so it does not inherit UI isolation.
-            let measureStereo = owner == .wearableBackup && wearableBackup.configuredStereo
-                && wearableBackup.sessionChannels == 2 && wearableBackup.nodeChannels == 2
+            let measureStereo = owner == .wearableMode && wearableMic.configuredStereo
+                && wearableMic.sessionChannels == 2 && wearableMic.nodeChannels == 2
             let tap = NativeRMSMeter.makeTap(aiProcessor: processor,
-                monitorStereo: owner == .wearableBackup, measureStereo: measureStereo) { [weak self] dbFS, stereo in
+                monitorStereo: owner == .wearableMode, measureStereo: measureStereo) { [weak self] dbFS, stereo in
                 // Only scalar readings cross threads, at approximately 10 updates per second.
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.captureID == id, self.isCapturing else { return }
@@ -154,7 +154,7 @@ final class AudioCaptureManager: ObservableObject {
                         ? self.rmsDBFS + 0.25 * (dbFS - self.rmsDBFS)
                         : dbFS
                     self.hasMeterReading = true
-                    if self.captureOwner == .wearableBackup, let stereo {
+                    if self.captureOwner == .wearableMode, let stereo {
                         self.updateWearableReading(stereo)
                     }
                 }
@@ -199,7 +199,7 @@ final class AudioCaptureManager: ObservableObject {
                 let status = await processor.status()
                 guard !Task.isCancelled, let self, self.captureID == id else { return }
                 self.aiBufferStatus = status
-                if self.captureOwner == .wearableBackup { self.wearableBackup.audioReady = status.isReady }
+                if self.captureOwner == .wearableMode { self.wearableMic.audioReady = status.isReady }
                 do { try await Task.sleep(for: .milliseconds(100)) }
                 catch { return }
             }
@@ -229,12 +229,12 @@ final class AudioCaptureManager: ObservableObject {
         rmsDBFS = -100
         hasMeterReading = false
         inputFormatDescription = nil
-        wearableBackup = .init()
-        backupEstimator.reset()
-        backupRouteSignature = nil
+        wearableMic = .init()
+        wearableEstimator.reset()
+        wearableRouteSignature = nil
 
         if sessionActive {
-            do { try restoreBackupPreferences() }
+            do { try restoreWearablePreferences() }
             catch { errorMessage = error.localizedDescription }
             do {
                 try session.setActive(false, options: .notifyOthersOnDeactivation)
@@ -245,13 +245,13 @@ final class AudioCaptureManager: ObservableObject {
         }
     }
 
-    private func restoreBackupPreferences() throws {
-        guard let preferences = backupPreferences else { return }
+    private func restoreWearablePreferences() throws {
+        guard let preferences = wearablePreferences else { return }
         try preferences.restore(session)
-        backupPreferences = nil
+        wearablePreferences = nil
     }
 
-    private func currentBackupRouteSignature() -> String {
+    private func currentWearableRouteSignature() -> String {
         let port = session.currentRoute.inputs.first
         let source = port?.selectedDataSource
         return "\(port?.uid ?? "")|\(source?.dataSourceID.stringValue ?? "")|"
@@ -259,20 +259,20 @@ final class AudioCaptureManager: ObservableObject {
     }
 
     private func updateWearableReading(_ reading: NativeStereoReading) {
-        guard captureOwner == .wearableBackup else { return }
-        guard backupRouteSignature == currentBackupRouteSignature() else {
-            stopForSystemEvent("Backup microphone input changed. Turn the microphone on again to retry.")
+        guard captureOwner == .wearableMode else { return }
+        guard wearableRouteSignature == currentWearableRouteSignature() else {
+            stopForSystemEvent("iPhone microphone input changed. Turn the microphone on again to retry.")
             return
         }
-        wearableBackup.bufferChannels = reading.channels
-        let usable = wearableBackup.configuredStereo && wearableBackup.sessionChannels == 2
-            && wearableBackup.nodeChannels == 2 && reading.channels == 2
-        wearableBackup.stereoUsable = usable
-        wearableBackup.channel1RMS = usable ? reading.channel1RMS : nil
-        wearableBackup.channel2RMS = usable ? reading.channel2RMS : nil
-        wearableBackup.channel1Peak = usable ? reading.channel1Peak : nil
-        wearableBackup.channel2Peak = usable ? reading.channel2Peak : nil
-        wearableBackup.channelDominance = StereoChannelDominance(estimate: backupEstimator.update(
+        wearableMic.bufferChannels = reading.channels
+        let usable = wearableMic.configuredStereo && wearableMic.sessionChannels == 2
+            && wearableMic.nodeChannels == 2 && reading.channels == 2
+        wearableMic.stereoUsable = usable
+        wearableMic.channel1RMS = usable ? reading.channel1RMS : nil
+        wearableMic.channel2RMS = usable ? reading.channel2RMS : nil
+        wearableMic.channel1Peak = usable ? reading.channel1Peak : nil
+        wearableMic.channel2Peak = usable ? reading.channel2Peak : nil
+        wearableMic.channelDominance = StereoChannelDominance(estimate: wearableEstimator.update(
             leftRMS: reading.channel1RMS ?? .nan, rightRMS: reading.channel2RMS ?? .nan,
             stereoUsable: usable))
     }

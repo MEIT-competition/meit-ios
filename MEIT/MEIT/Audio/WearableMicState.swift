@@ -13,7 +13,7 @@ struct NativeStereoReading: Sendable {
 enum StereoChannelDominance: String, Sendable {
     case channel1Dominant, channel2Dominant, balanced, unavailable
 
-    init(estimate: WearableBackupDirection) {
+    init(estimate: WearableDirection) {
         switch estimate {
         case .left: self = .channel1Dominant
         case .right: self = .channel2Dominant
@@ -25,8 +25,8 @@ enum StereoChannelDominance: String, Sendable {
     var localizationKey: String { "wearable.dominance.\(rawValue)" }
 }
 
-// Immutable snapshots are published by the existing audio owner; no transport or motor command.
-struct WearableBackupState: Sendable {
+// Immutable snapshots are published by the existing audio owner; metadata for a future laptop transport; no transport or motor command.
+struct WearableMicState: Sendable {
     var inputPort = "—"
     var dataSource = "—"
     var maximumChannels = 0
@@ -44,8 +44,8 @@ struct WearableBackupState: Sendable {
     var channel1Peak: Double?
     var channel2Peak: Double?
     var channelDominance: StereoChannelDominance = .unavailable
-    // No measured channel-to-physical-direction mapping exists yet. Fail closed for UI/adapters.
-    var direction: WearableBackupDirection { .unavailable }
+    // No measured channel-to-physical-direction mapping exists yet. Fail closed for UI/future laptop metadata.
+    var direction: WearableDirection { .unavailable }
     var audioReady = false
     var configurationNote: String?
     // Physical mapping must be measured on-device. Never emit verified motor directions here.
@@ -86,7 +86,7 @@ struct WearableBackupState: Sendable {
 }
 
 // Only touches preferences while the session is active and the engine/tap are not running.
-// Retain failed restoration work so a later start cannot silently inherit backup settings.
+// Retain failed restoration work so a later start cannot silently inherit wearable capture settings.
 @MainActor
 final class WearableAudioPreferences {
     private let previousInput: AVAudioSessionPortDescription?

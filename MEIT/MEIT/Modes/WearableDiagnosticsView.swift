@@ -4,11 +4,12 @@ import SwiftUI
 struct WearableDiagnosticsView: View {
     @ObservedObject var audio: AudioCaptureManager
     @Environment(\.appLanguage) private var language
-    private var state: WearableBackupState { audio.wearableBackup }
+    private var state: WearableMicState { audio.wearableMic }
 
     var body: some View {
         List {
             Section(language.text("wearable.stereoInput")) {
+                value("wearable.audioInput", language.text("wearable.iPhoneMicrophone"))
                 value("wearable.inputPort", state.inputPort)
                 value("wearable.dataSource", state.dataSource)
                 value("wearable.maximumChannels", "\(state.maximumChannels)")
