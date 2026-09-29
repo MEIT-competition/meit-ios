@@ -4,12 +4,18 @@ import Foundation
 
 @MainActor
 final class AudioCaptureManager: ObservableObject {
+    enum CaptureOwner: Equatable {
+        case none, iphoneMode, wearableBackup
+    }
+
     enum MicrophonePermission: String {
         case notDetermined
         case granted
         case denied
     }
 
+    @Published private(set) var captureOwner: CaptureOwner = .none
+    @Published private(set) var wearableBackup = WearableBackupState()
     @Published private(set) var isCapturing = false
     @Published private(set) var isStarting = false
     @Published private(set) var rmsDBFS = -100.0
@@ -27,6 +33,9 @@ final class AudioCaptureManager: ObservableObject {
     private var aiProcessor: AIInputProcessor?
     private var aiStatusTask: Task<Void, Never>?
     private var snapshotPending = false
+    private var backupPreferences: WearableAudioPreferences?
+    private var backupEstimator = StereoDirectionEstimator()
+    private var backupRouteSignature: String?
     private var engineObserver: AnyCancellable?
     private var sessionObservers = Set<AnyCancellable>()
 
@@ -58,10 +67,11 @@ final class AudioCaptureManager: ObservableObject {
         }
     }
 
-    func startCapture() async {
-        guard !isCapturing, !isStarting else { return }
+    func startCapture(owner: CaptureOwner = .iphoneMode) async {
+        guard owner != .none, !Task.isCancelled, !isCapturing, !isStarting else { return }
         let id = UUID()
         captureID = id
+        captureOwner = owner
         isStarting = true
         errorMessage = nil
         defer {
@@ -72,13 +82,15 @@ final class AudioCaptureManager: ObservableObject {
         if microphonePermission == .notDetermined {
             _ = await AVAudioApplication.requestRecordPermission()
             // Stop/backgrounding may have cancelled this request while the prompt was visible.
-            guard captureID == id else { return }
+            guard captureID == id, captureOwner == owner else { return }
+            if Task.isCancelled { stopCapture(owner: owner); return }
             refreshPermission()
         }
         guard microphonePermission == .granted else {
             errorMessage = "Microphone access is denied. Enable it for MEIT in Settings."
             isStarting = false
             captureID = nil
+            captureOwner = .none
             return
         }
 
@@ -87,6 +99,24 @@ final class AudioCaptureManager: ObservableObject {
             try session.setActive(true)
             sessionActive = true
             guard session.isInputAvailable else { throw CaptureError.unavailableInput }
+            // A failed previous restoration must be resolved before either mode can capture.
+            try restoreBackupPreferences()
+            if owner == .wearableBackup {
+                wearableBackup = .init()
+                backupEstimator.reset()
+                backupPreferences = WearableAudioPreferences(session: session)
+                guard let preferences = backupPreferences else { throw CaptureError.unavailableInput }
+                do { try preferences.requestStereo(session) }
+                catch {
+                    // A stereo request failure is not a mono capture failure. Undo partial requests.
+                    wearableBackup.configurationNote = error.localizedDescription
+                    try restoreBackupPreferences()
+                }
+                // The backup action must not silently capture an external headset microphone.
+                guard session.currentRoute.inputs.first?.portType == .builtInMic else {
+                    throw CaptureError.unavailableInput
+                }
+            }
 
             // A fresh engine per capture avoids carrying a stopped/changed graph into a restart.
             let newEngine = AVAudioEngine()
@@ -98,6 +128,13 @@ final class AudioCaptureManager: ObservableObject {
                 throw CaptureError.unavailableInput
             }
 
+            if owner == .wearableBackup {
+                let note = wearableBackup.configurationNote
+                wearableBackup = .inspect(session, nodeChannels: Int(format.channelCount))
+                wearableBackup.configurationNote = note
+                backupRouteSignature = currentBackupRouteSignature()
+            }
+
             let processor = try AIInputProcessor(nativeFormat: format) { [weak self] message in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.captureID == id else { return }
@@ -106,14 +143,20 @@ final class AudioCaptureManager: ObservableObject {
             }
             aiProcessor = processor
             // Build the audio callback outside MainActor so it does not inherit UI isolation.
-            let tap = NativeRMSMeter.makeTap(aiProcessor: processor) { [weak self] dbFS in
-                // Only a scalar crosses threads, at approximately 10 updates per second.
+            let measureStereo = owner == .wearableBackup && wearableBackup.configuredStereo
+                && wearableBackup.sessionChannels == 2 && wearableBackup.nodeChannels == 2
+            let tap = NativeRMSMeter.makeTap(aiProcessor: processor,
+                monitorStereo: owner == .wearableBackup, measureStereo: measureStereo) { [weak self] dbFS, stereo in
+                // Only scalar readings cross threads, at approximately 10 updates per second.
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.captureID == id, self.isCapturing else { return }
                     self.rmsDBFS = self.hasMeterReading
                         ? self.rmsDBFS + 0.25 * (dbFS - self.rmsDBFS)
                         : dbFS
                     self.hasMeterReading = true
+                    if self.captureOwner == .wearableBackup, let stereo {
+                        self.updateWearableReading(stereo)
+                    }
                 }
             }
             input.installTap(onBus: 0, bufferSize: 1024, format: format, block: tap)
@@ -156,15 +199,19 @@ final class AudioCaptureManager: ObservableObject {
                 let status = await processor.status()
                 guard !Task.isCancelled, let self, self.captureID == id else { return }
                 self.aiBufferStatus = status
+                if self.captureOwner == .wearableBackup { self.wearableBackup.audioReady = status.isReady }
                 do { try await Task.sleep(for: .milliseconds(100)) }
                 catch { return }
             }
         }
     }
 
-    func stopCapture() {
+    func stopCapture(owner expectedOwner: CaptureOwner? = nil) {
+        // A disappearing old mode can only stop its own capture, never the new mode's engine.
+        if let expectedOwner, captureOwner != expectedOwner { return }
         // Invalidate permission completions and queued readings before touching the engine.
         captureID = nil
+        captureOwner = .none
         aiStatusTask?.cancel()
         aiStatusTask = nil
         isStarting = false
@@ -182,8 +229,13 @@ final class AudioCaptureManager: ObservableObject {
         rmsDBFS = -100
         hasMeterReading = false
         inputFormatDescription = nil
+        wearableBackup = .init()
+        backupEstimator.reset()
+        backupRouteSignature = nil
 
         if sessionActive {
+            do { try restoreBackupPreferences() }
+            catch { errorMessage = error.localizedDescription }
             do {
                 try session.setActive(false, options: .notifyOthersOnDeactivation)
                 sessionActive = false
@@ -191,6 +243,38 @@ final class AudioCaptureManager: ObservableObject {
                 errorMessage = "Unable to deactivate audio session: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func restoreBackupPreferences() throws {
+        guard let preferences = backupPreferences else { return }
+        try preferences.restore(session)
+        backupPreferences = nil
+    }
+
+    private func currentBackupRouteSignature() -> String {
+        let port = session.currentRoute.inputs.first
+        let source = port?.selectedDataSource
+        return "\(port?.uid ?? "")|\(source?.dataSourceID.stringValue ?? "")|"
+            + "\(source?.selectedPolarPattern?.rawValue ?? "")|\(session.inputOrientation.rawValue)|\(session.inputNumberOfChannels)"
+    }
+
+    private func updateWearableReading(_ reading: NativeStereoReading) {
+        guard captureOwner == .wearableBackup else { return }
+        guard backupRouteSignature == currentBackupRouteSignature() else {
+            stopForSystemEvent("Backup microphone input changed. Turn the microphone on again to retry.")
+            return
+        }
+        wearableBackup.bufferChannels = reading.channels
+        let usable = wearableBackup.configuredStereo && wearableBackup.sessionChannels == 2
+            && wearableBackup.nodeChannels == 2 && reading.channels == 2
+        wearableBackup.stereoUsable = usable
+        wearableBackup.channel1RMS = usable ? reading.channel1RMS : nil
+        wearableBackup.channel2RMS = usable ? reading.channel2RMS : nil
+        wearableBackup.channel1Peak = usable ? reading.channel1Peak : nil
+        wearableBackup.channel2Peak = usable ? reading.channel2Peak : nil
+        wearableBackup.channelDominance = StereoChannelDominance(estimate: backupEstimator.update(
+            leftRMS: reading.channel1RMS ?? .nan, rightRMS: reading.channel2RMS ?? .nan,
+            stereoUsable: usable))
     }
 
     private func stopForSystemEvent(_ message: String) {
@@ -214,18 +298,24 @@ private final class NativeRMSMeter {
     private var sumOfSquares = 0.0
     private var sampleCount = 0
     private var frameCount = 0
+    private var channel1Power = 0.0
+    private var channel2Power = 0.0
+    private var channel1Peak = 0.0
+    private var channel2Peak = 0.0
+    private var stereoFrames = 0
+    private var stereoInvalid = false
 
-    static func makeTap(aiProcessor: AIInputProcessor,
-                        onReading: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+    static func makeTap(aiProcessor: AIInputProcessor, monitorStereo: Bool, measureStereo: Bool,
+                        onReading: @escaping @Sendable (Double, NativeStereoReading?) -> Void) -> AVAudioNodeTapBlock {
         let meter = NativeRMSMeter()
         return { buffer, _ in
             aiProcessor.enqueue(buffer)
-            guard let dbFS = meter.consume(buffer) else { return }
-            onReading(dbFS)
+            guard let reading = meter.consume(buffer, monitorStereo: monitorStereo, measureStereo: measureStereo) else { return }
+            onReading(reading.0, reading.1)
         }
     }
 
-    private func consume(_ buffer: AVAudioPCMBuffer) -> Double? {
+    private func consume(_ buffer: AVAudioPCMBuffer, monitorStereo: Bool, measureStereo: Bool) -> (Double, NativeStereoReading?)? {
         let frames = Int(buffer.frameLength)
         let channels = Int(buffer.format.channelCount)
         let sampleRate = buffer.format.sampleRate
@@ -240,18 +330,44 @@ private final class NativeRMSMeter {
             for frame in 0..<frames {
                 let sample = Double(samples[frame * stride])
                 if sample.isFinite { sumOfSquares += sample * sample }
+                if measureStereo && channels == 2 {
+                    if !sample.isFinite { stereoInvalid = true }
+                    else if channel == 0 {
+                        channel1Power += sample * sample
+                        channel1Peak = max(channel1Peak, abs(sample))
+                    } else {
+                        channel2Power += sample * sample
+                        channel2Peak = max(channel2Peak, abs(sample))
+                    }
+                }
             }
+        }
+        if monitorStereo {
+            if measureStereo && channels == 2 { stereoFrames += frames }
+            else { stereoInvalid = true }
         }
         sampleCount += frames * channels
         frameCount += frames
         guard Double(frameCount) >= sampleRate * 0.1 else { return nil }
 
+        var stereo: NativeStereoReading?
+        if monitorStereo {
+            let validStereo = measureStereo && channels == 2 && stereoFrames > 0 && !stereoInvalid
+            stereo = NativeStereoReading(channels: channels,
+                channel1RMS: validStereo ? sqrt(channel1Power / Double(stereoFrames)) : nil,
+                channel2RMS: validStereo ? sqrt(channel2Power / Double(stereoFrames)) : nil,
+                channel1Peak: validStereo ? channel1Peak : nil,
+                channel2Peak: validStereo ? channel2Peak : nil)
+            channel1Power = 0; channel2Power = 0
+            channel1Peak = 0; channel2Peak = 0
+            stereoFrames = 0; stereoInvalid = false
+        }
         let rms = sqrt(sumOfSquares / Double(sampleCount))
         sumOfSquares = 0
         sampleCount = 0
         frameCount = 0
         // 1e-5 amplitude corresponds to -100 dBFS; never publish NaN or infinity.
-        guard rms.isFinite else { return -100 }
-        return min(0, max(-100, 20 * log10(max(rms, 0.00001))))
+        guard rms.isFinite else { return (-100, stereo) }
+        return (min(0, max(-100, 20 * log10(max(rms, 0.00001)))), stereo)
     }
 }
