@@ -4,8 +4,8 @@ enum OperatingMode: String, CaseIterable, Codable {
 
     var displayName: String {
         switch self {
-        case .hardware: return "Hardware"
-        case .fallback: return "iPhone Fallback"
+        case .hardware: return "hardware"
+        case .fallback: return "iphone fallback"
         }
     }
 }

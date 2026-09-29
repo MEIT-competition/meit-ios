@@ -17,6 +17,7 @@
 		A10000000000000000000009 /* OperatingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* OperatingMode.swift */; };
 		A10000000000000000000010 /* HardwareModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* HardwareModeView.swift */; };
 		A10000000000000000000011 /* FallbackModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* FallbackModeView.swift */; };
+		A10000000000000000000012 /* FallbackDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* FallbackDetailsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 		A20000000000000000000011 /* OperatingMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperatingMode.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* HardwareModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareModeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* FallbackModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackModeView.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* FallbackDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackDetailsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +103,7 @@
 				A20000000000000000000011 /* OperatingMode.swift */,
 				A20000000000000000000012 /* HardwareModeView.swift */,
 				A20000000000000000000013 /* FallbackModeView.swift */,
+				A20000000000000000000014 /* FallbackDetailsView.swift */,
 			);
 			path = Modes;
 			sourceTree = "<group>";
@@ -166,6 +169,7 @@
 				A10000000000000000000009 /* OperatingMode.swift in Sources */,
 				A10000000000000000000010 /* HardwareModeView.swift in Sources */,
 				A10000000000000000000011 /* FallbackModeView.swift in Sources */,
+				A10000000000000000000012 /* FallbackDetailsView.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,
@@ -212,9 +216,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MEIT/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
+				INFOPLIST_KEY_CFBundleDisplayName = "meit ios";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "meit ios uses the microphone to detect environmental sounds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -235,9 +239,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MEIT/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "MEIT iOS";
+				INFOPLIST_KEY_CFBundleDisplayName = "meit ios";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MEIT uses the microphone to detect environmental sounds.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "meit ios uses the microphone to detect environmental sounds.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

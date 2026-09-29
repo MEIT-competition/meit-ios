@@ -1,4 +1,4 @@
-# MEIT iOS
+# meit ios
 
 현재 단계: **Phase 6A - Single-iPhone stabilization**.
 
@@ -28,7 +28,7 @@ Phase 5에서는 bridge가 자동 이벤트와 단일 audio source를 선택한�
 
 ## Operating Modes
 
-하나의 앱에서 상단 segmented picker로 **Hardware / iPhone Fallback** 운용 경로를 선택한다.
+하나의 앱에서 상단 segmented picker로 **hardware / iphone fallback** 운용 경로를 선택한다.
 
 | 모드 | 현재 범위 |
 |---|---|
@@ -46,8 +46,8 @@ Phase 5에서는 bridge가 자동 이벤트와 단일 audio source를 선택한�
   role·UUID는 기존 UserDefaults 저장을 유지한다. 다른 폰에도 영향을 주는 서버의 전역 Auto 설정은
   변경하지 않는다. 이미 서버가 수락한 추론이나 OS에 전달된 한 번의 진동은 취소할 수 없다.
 - Hardware → Fallback 복귀 시 이전 연결 성공 주소가 있으면 coordination을 다시 연결한다.
-  마이크는 자동 시작하지 않으며 사용자가 **Start Capture**를 눌러야 한다.
-- Hardware 화면은 Not Connected / —와 비활성 Connect Hardware / Test Motors 버튼만 표시한다.
+  마이크는 자동 시작하지 않으며 사용자가 **start listening**을 눌러야 한다.
+- Hardware 화면은 wearable / not connected와 integration 준비 중 안내만 표시한다.
   iPhone 마이크·PCM 전송·role·진동, ESP32/BLE 통신, 모의 데이터는 사용하지 않는다.
 
 Hardware Mode TODO (이번 단계 미구현):
@@ -62,10 +62,11 @@ Hardware Mode TODO (이번 단계 미구현):
 Windows에서 기존 bridge 테스트 **60개 통과**. 프로젝트 소스 참조·중복 등록, 객체 소유권,
 전환 정리 경로 및 전체 diff를 정적 검토했다. Audio/Network/Haptics 내부, Python bridge,
 기존 meit-ai, unsigned IPA workflow는 변경하지 않았다.
-**이번 모드 분리의 Xcode 컴파일과 실제 iPhone 동작은 아직 검증하지 않았다.**
+기존 모드 전환과 Fallback의 실제 iPhone 동작은 사용자 확인으로 검증되었다.
+**이번 UI redesign은 새 GitHub Actions 빌드와 실제 iPhone 검증이 필요하다.**
 
-1. 기존 GitHub Actions를 수동 실행해 Modes의 세 Swift 파일 컴파일, 링크 및 unsigned IPA 생성을 확인한다.
-2. 새 IPA 설치 후 저장된 선택이 없으면 Hardware인지, 미연결 표시와 두 비활성 버튼만 있는지 확인한다.
+1. 기존 GitHub Actions를 수동 실행해 Modes의 Swift 파일 컴파일, 링크 및 unsigned IPA 생성을 확인한다.
+2. 새 IPA 설치 후 저장된 선택이 없으면 Hardware인지, 미연결 표시와 integration 안내만 있는지 확인한다.
    이 상태에서 마이크 권한 요청·capture·RMS 보고·command polling이 시작되면 안 된다.
 3. Fallback을 선택하고 아래 Phase 1–6A 및 bridge 문서의 기존 테스트를 수행한다.
    Start → Buffer Ready, 수동 inference, Auto, registration/RMS, 진동, Diagnostics를 확인한다.
@@ -79,6 +80,32 @@ Windows에서 기존 bridge 테스트 **60개 통과**. 프로젝트 소스 참�
 
 Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A single-iPhone stabilization의
 실기기 검증과 Phase 6B four-iPhone final calibration도 기존 대기 상태를 유지한다.
+
+## UI & branding
+
+- 앱 표시 이름과 상단 title은 `meit ios`, 모드는 `hardware / iphone fallback`이다.
+- 메인은 listening → auto detection → last detection / direction → device position / server →
+  하나의 start/stop listening action 순서다. 시작/정지는 하단에 고정해 스크롤 중에도 접근할 수 있다.
+  마이크 활성 상태와 자동 분석 가능 상태를 구분한다.
+  마지막 결과는 이 화면에서 가장 최근 관측한 수동/자동 결과 하나이며 과거 결과임을 표시한다.
+- 오른쪽 settings에서 주소·연결 테스트·position·about을 제공한다. diagnostics는 메인에서도
+  바로 열 수 있고 RMS/PCM/buffer, 네트워크, Auto threshold/state/event/timing을 보존한다.
+  developer tools에는 기존 다섯 테스트 액션과 취소·수동 결과·진동 상태를 유지한다.
+- 상세 화면은 sheet 안의 NavigationStack으로 탐색한다. 상세 화면 이동은 capture/polling을
+  정리하지 않고 snapshot 조회만 취소한다. 기존 모드 전환·background 정리는 유지한다.
+- system typography/colors, Dynamic Type, 텍스트 상태, VoiceOver label, 최소 44pt 주요 버튼을
+  사용한다. custom font, animation, glass/card 효과를 추가하지 않는다.
+- 새 IPA에서 Light/Dark, 큰 글자, VoiceOver, sheet 열기/뒤로/닫기 중 capture 유지,
+  Auto·수동 결과 표시, 모든 테스트 액션과 모드 전환·foreground 복구를 확인한다.
+  이전 Phase 테스트의 Start/Stop Capture는 현재 start/stop listening에 해당하고,
+  기술 수치와 테스트 버튼은 diagnostics/developer tools에서 찾는다.
+
+AppIcon design specification: 검정 바탕에 흰 소문자 `m` 하나. 폭·획·terminal 비율을 미세하게
+조정한 독자적인 단색 lettering, 넉넉한 여백, 작은 홈 화면 크기에서도 분명한 형태를 목표로 한다.
+파형·마이크·화살표·gradient·glow·그림자 및 타 브랜드 로고 복제는 사용하지 않는다.
+현재 AppIcon asset은 없으며 이번에는 PNG/SVG나 빈 asset을 추가하지 않았다.
+TODO: 최종 artwork와 작은 크기 검수 후 불투명 1024px 원본을 AppIcon asset에 연결하고
+Xcode asset compilation 및 실제 홈 화면을 검증한다. 빌드에 임시 asset 경로를 지정하지 않는다.
 
 ## 프로젝트
 
@@ -100,7 +127,8 @@ meit-ios/
 │       ├── Modes/
 │       │   ├── OperatingMode.swift
 │       │   ├── HardwareModeView.swift
-│       │   └── FallbackModeView.swift
+│       │   ├── FallbackModeView.swift
+│       │   └── FallbackDetailsView.swift
 │       ├── Network/
 │       │   ├── NetworkManager.swift
 │       │   └── DeviceCoordinator.swift
@@ -126,7 +154,7 @@ meit-ios/
 
 `MEITApp.swift`는 앱 진입점, `ContentView.swift`는 공통 객체 소유·모드 선택·전환 정리를 담당한다.
 `Modes/OperatingMode.swift`는 저장 값과 표시 이름, `HardwareModeView.swift`는 하드웨어 UI shell,
-`FallbackModeView.swift`는 기존 상태·버튼·오류·Diagnostics 화면을 담당한다.
+`FallbackModeView.swift`는 listening과 감지 결과를, `FallbackDetailsView.swift`는 settings·diagnostics·developer tools를 표시한다.
 `Audio/AudioCaptureManager.swift`는 기존 권한·세션·엔진·RMS를 유지하며 AI 처리 수명주기를 연결한다.
 `Audio/AIInputProcessor.swift`는 제한된 PCM 복사 큐와 AVAudioConverter를 관리한다.
 `Audio/AIInputBuffer.swift`는 규격, 40,000-sample ring buffer, immutable snapshot을 정의한다.
@@ -140,7 +168,7 @@ meit-ios/
 - Start를 누르면 iOS 17의 `AVAudioApplication.requestRecordPermission()`으로 권한을 요청한다.
   `notDetermined` / `granted` / `denied`를 구분하며, 거부 시 Settings에서 허용하도록 안내한다.
   Debug/Release 모두 자동 생성 Info.plist에 `NSMicrophoneUsageDescription`을 포함한다:
-  **MEIT uses the microphone to detect environmental sounds.**
+  **meit ios uses the microphone to detect environmental sounds.**
 - `AVAudioSession`은 `.record`, `.measurement`, 옵션 없음으로 설정 후 활성화한다.
   세션 활성화·엔진 시작·세션 비활성화 실패는 화면의 Error에 표시한다.
 - 매 Start마다 새 `AVAudioEngine`을 만들고 input node의 `outputFormat(forBus: 0)`을

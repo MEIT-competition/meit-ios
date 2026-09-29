@@ -12,27 +12,28 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                Text("MEIT iOS").font(.title)
-                Text("Operating Mode").font(.headline)
-                Picker("Operating Mode", selection: modeSelection) {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("operating mode", selection: modeSelection) {
                     ForEach(OperatingMode.allCases, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+
+                switch operatingMode {
+                case .hardware:
+                    HardwareModeView()
+                case .fallback:
+                    FallbackModeView(audio: audio, network: network, devices: devices, haptics: haptics,
+                                     operatingMode: $operatingMode, onStartCapture: startCapture,
+                                     onStopCapture: stopCapture, onDeactivate: deactivateFallback)
+                }
             }
-            .padding()
-            Divider()
-            switch operatingMode {
-            case .hardware:
-                HardwareModeView()
-            case .fallback:
-                FallbackModeView(audio: audio, network: network, devices: devices, haptics: haptics,
-                                 operatingMode: $operatingMode, onStartCapture: startCapture,
-                                 onStopCapture: stopCapture, onDeactivate: deactivateFallback)
-            }
+            .navigationTitle("meit ios")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
