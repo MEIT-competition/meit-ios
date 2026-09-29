@@ -165,3 +165,19 @@
 "wearable.stereoRequest.requested" = "스테레오를 요청했습니다. 실제 세션/노드/버퍼 채널 수를 확인하세요.";
 "wearable.stereoRequest.channelsUnavailable" = "스테레오 소스를 선택했지만 현재 경로에서 2채널 입력을 사용할 수 없습니다.";
 "wearable.stereoRequest.failed" = "스테레오 설정에 실패했습니다. 아래 오류를 확인하세요.";
+
+/* Read-only AVCapture input capability probe (advanced diagnostics only). */
+"wearable.captureProbe.title" = "AVCapture 지원 기능";
+"wearable.captureProbe.input" = "AVCapture 오디오 입력 사용 가능";
+"wearable.captureProbe.stereo" = "AVCapture 스테레오 지원";
+"wearable.captureProbe.spatial" = "AVCapture 공간 음향 지원";
+"wearable.captureProbe.mode" = "현재 멀티채널 모드 · 조회용 입력";
+"wearable.captureProbe.note" = "캡처 세션에 연결하지 않은 입력을 읽기 전용으로 조회합니다. 이 모드(보통 none)는 현재 수음 형식이 아닙니다. 지원 여부는 실제 PCM 수음이나 물리 방향을 검증하지 않습니다. 외부 마이크를 분리하고 확인하세요.";
+"wearable.captureProbe.notChecked" = "미확인";
+"wearable.captureProbe.checking" = "지원 여부 확인 중…";
+"wearable.captureProbe.requiresIOS18" = "이 기능 조회 API는 iOS 18 이상이 필요합니다.";
+"wearable.captureProbe.permissionRequired" = "감지 시작에서 마이크 권한을 허용한 뒤 진단 화면을 다시 여세요.";
+"wearable.captureProbe.permissionDenied" = "마이크 권한이 거부되거나 제한되어 지원 여부를 확인하지 않았습니다.";
+"wearable.captureProbe.inputUnavailable" = "사용 가능한 AVCapture 마이크 장치가 없습니다.";
+"wearable.captureProbe.failed" = "조회용 입력을 생성하지 못해 지원 여부를 확인하지 않았습니다.";
+"wearable.captureProbe.complete" = "조회 완료 · 입력만 확인";

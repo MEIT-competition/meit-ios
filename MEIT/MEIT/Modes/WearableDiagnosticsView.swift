@@ -43,6 +43,7 @@ struct WearableDiagnosticsView: View {
 @MainActor
 private struct WearableAdvancedDiagnosticsView: View {
     @ObservedObject var audio: AudioCaptureManager
+    @State private var captureCapabilities = AVCaptureAudioCapabilities()
     @Environment(\.appLanguage) private var language
     private var state: WearableMicState { audio.wearableMic }
 
@@ -60,6 +61,15 @@ private struct WearableAdvancedDiagnosticsView: View {
                 if !state.stereoUsable {
                     Text(language.text("wearable.stereoUnavailable")).foregroundStyle(.secondary)
                 }
+            }
+            Section(language.text("wearable.captureProbe.title")) {
+                Text(language.text(captureCapabilities.status.localizationKey)).foregroundStyle(.secondary)
+                value("wearable.captureProbe.input", capabilityText(captureCapabilities.inputAvailable))
+                value("wearable.captureProbe.stereo", capabilityText(captureCapabilities.stereoSupported))
+                value("wearable.captureProbe.spatial", capabilityText(captureCapabilities.spatialAudioSupported))
+                value("wearable.captureProbe.mode", captureCapabilities.currentMode ?? language.text("wearable.captureProbe.notChecked"))
+                Text(language.text("wearable.captureProbe.note")).foregroundStyle(.secondary)
+                if let error = captureCapabilities.errorMessage { Text(error).foregroundStyle(.red) }
             }
             Section(language.text("wearable.dataSourceCatalog")) {
                 if state.availableDataSources.isEmpty {
@@ -107,6 +117,17 @@ private struct WearableAdvancedDiagnosticsView: View {
         }
         .navigationTitle(language.text("wearable.advancedDiagnostics"))
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: audio.microphonePermission.rawValue) {
+            captureCapabilities = AVCaptureAudioCapabilities(status: .checking)
+            let result = await AVCaptureAudioCapabilityProbe.inspect()
+            guard !Task.isCancelled else { return }
+            captureCapabilities = result
+        }
+    }
+
+    private func capabilityText(_ supported: Bool?) -> String {
+        guard let supported else { return language.text("wearable.captureProbe.notChecked") }
+        return supported ? "true" : "false"
     }
 
     private func value(_ key: String, _ text: String) -> some View {

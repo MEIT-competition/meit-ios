@@ -165,3 +165,19 @@
 "wearable.stereoRequest.requested" = "Stereo requested; verify actual session/node/buffer channels.";
 "wearable.stereoRequest.channelsUnavailable" = "Stereo source selected, but the active route allows fewer than 2 input channels.";
 "wearable.stereoRequest.failed" = "Stereo configuration failed; see the error below.";
+
+/* Read-only AVCapture input capability probe (advanced diagnostics only). */
+"wearable.captureProbe.title" = "AVCapture capabilities";
+"wearable.captureProbe.input" = "AVCapture audio input available";
+"wearable.captureProbe.stereo" = "AVCapture stereo support";
+"wearable.captureProbe.spatial" = "AVCapture spatial audio support";
+"wearable.captureProbe.mode" = "Current multichannel mode · probe input";
+"wearable.captureProbe.note" = "Read-only check of an input not connected to a capture session. Its mode (normally none) is not the active audio format. Support does not verify PCM capture or physical direction. Test with external microphones disconnected.";
+"wearable.captureProbe.notChecked" = "Not checked";
+"wearable.captureProbe.checking" = "Checking capabilities…";
+"wearable.captureProbe.requiresIOS18" = "This capability API requires iOS 18 or later.";
+"wearable.captureProbe.permissionRequired" = "Allow microphone access through Start listening, then reopen these diagnostics.";
+"wearable.captureProbe.permissionDenied" = "Microphone permission is denied or restricted. Capability was not checked.";
+"wearable.captureProbe.inputUnavailable" = "No AVCapture microphone device is available.";
+"wearable.captureProbe.failed" = "Could not create the probe input. Capability was not checked.";
+"wearable.captureProbe.complete" = "Checked · input only";

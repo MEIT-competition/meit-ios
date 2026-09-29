@@ -25,6 +25,7 @@
 		B10000000000000000000001 /* StereoDirectionEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* StereoDirectionEstimator.swift */; };
 		B10000000000000000000002 /* WearableMicState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* WearableMicState.swift */; };
 		B10000000000000000000003 /* WearableDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* WearableDiagnosticsView.swift */; };
+		B10000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +51,7 @@
 		B20000000000000000000001 /* StereoDirectionEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoDirectionEstimator.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* WearableMicState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableMicState.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* WearableDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableDiagnosticsView.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVCaptureAudioCapabilityProbe.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -97,6 +99,7 @@
 			children = (
 				A20000000000000000000004 /* AudioCaptureManager.swift */,
 				B20000000000000000000002 /* WearableMicState.swift */,
+				B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */,
 				B20000000000000000000001 /* StereoDirectionEstimator.swift */,
 				A20000000000000000000005 /* AIInputBuffer.swift */,
 				A20000000000000000000006 /* AIInputProcessor.swift */,
@@ -220,6 +223,7 @@
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 				B10000000000000000000003 /* WearableDiagnosticsView.swift in Sources */,
+				B10000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift in Sources */,
 				B10000000000000000000002 /* WearableMicState.swift in Sources */,
 				B10000000000000000000001 /* StereoDirectionEstimator.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,

@@ -116,6 +116,42 @@ wearable mode iPhone audio
 [input selection](https://developer.apple.com/library/archive/qa/qa1799/_index.html),
 [input channel request](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinputnumberofchannels(_:)).
 
+### AVCapture multichannel capability probe — iPhone 16
+
+실제 대상은 iPhone 16 기본 모델이다. Apple 사양의 Spatial Audio / stereo recording 지원과
+현재 AVAudioSession source의 stereo polar pattern 제공 여부는 별개다. `.stereo` 패턴이 없다는
+관측만으로 기기 전체의 multichannel capture가 불가능하다고 결론 내리지 않는다.
+
+- Wearable **고급 진단**을 열 때 임시 `AVCaptureDeviceInput`을 만들고 다음 값을 조회한다:
+  `AVCapture audio input available`, `isMultichannelAudioModeSupported(.stereo)`,
+  `isMultichannelAudioModeSupported(.firstOrderAmbisonics)`, `multichannelAudioMode`.
+- 조회는 UI/audio callback 밖에서 수행하며 결과 값만 UI로 전달한다. 화면을 나간 뒤의 결과는 반영하지 않는다.
+  iOS의 `.microphone`은 논리적 장치이므로 실제 기기 검증은 외부 마이크를 분리한 상태에서 수행한다.
+- `AVCaptureSession` / `AVCaptureAudioDataOutput`을 생성하거나 실행하지 않는다. Input을 session에
+  연결하지 않고 mode도 설정하지 않는다. 기존 AVAudioSession/AVAudioEngine 설정과 pipeline은 그대로다.
+- 표시 mode는 **조회용 input의 현재 값**(기본값 `none`)이다. 실행 중인 AVAudioEngine의 mode나
+  native PCM 채널 수를 나타내지 않는다. 지원 true도 실제 stereo/FOA PCM 수음 성공을 증명하지 않는다.
+- 마이크 권한을 요청하지 않는다. 기존 Start listening에서 권한 허용 후 진단을 다시 열면 된다.
+  권한 부족, input 생성 오류, OS 미지원은 지원 false와 구분해 `미확인 / Not checked`로 표시한다.
+- Multichannel enum/input capability API는 **iOS 18+**다. Deployment target 17.0은 유지하고
+  `#available(iOS 18.0, *)`로 보호한다. 빌드는 iOS 18 SDK를 포함한 Xcode 16 이상이 필요하다.
+  기존 Actions의 Xcode/SDK 로그를 확인한다. Workflow는 변경하지 않았다.
+- `AVCaptureAudioDataOutput.spatialAudioChannelLayoutTag`는 **iOS 26+**다. FOA input에서
+  FOA 4채널 또는 stereo 2채널 output을 구성하는 API이며, 이번에는 조사만 하고 사용하지 않는다.
+- 실기기에서 stereo=true이면 이후 Wearable 전용 AVCapture stereo PCM을 검토한다.
+  stereo=false / FOA=true이면 FOA 또는 지원 OS의 stereo output 경로를 별도로 검토한다.
+  둘 다 false여도 이 조회 context의 결과이며 기기 전체의 녹음 불가능 판정으로 확대하지 않는다.
+  이번 patch는 FOA 방향 계산, audio pipeline 교체, AI/bridge/BLE/motor 연결을 구현하지 않는다.
+
+실기기 확인: 새 IPA 설치 → Wearable Start로 권한 허용 → 진단 정보 → 고급 진단 정보에서
+네 조회 값을 기록한다. Native mono 여부와 별도로 비교하고, 조회 후에도 RMS와 40,000-sample
+AI buffer, Start/Stop 및 iPhone mode가 정상인지 확인한다. 실제 true/false는 아직 미검증이다.
+
+근거: [iPhone 16 사양](https://support.apple.com/ko-kr/121029),
+[capability query](https://developer.apple.com/documentation/avfoundation/avcapturedeviceinput/ismultichannelaudiomodesupported(_:)),
+[multichannel mode](https://developer.apple.com/documentation/avfoundation/avcapturedeviceinput/multichannelaudiomode),
+[spatial audio output](https://developer.apple.com/documentation/avfoundation/avcaptureaudiodataoutput/spatialaudiochannellayouttag).
+
 ### Mode lifecycle
 
 - iPhone → Wearable: 기존 capture/Start 작업, 수동 요청, 자동 snapshot/upload, registration/RMS/polling,
