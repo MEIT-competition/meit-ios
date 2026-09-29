@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct WearableDiagnosticsView: View {
     @ObservedObject var audio: AudioCaptureManager
+    @ObservedObject var network: NetworkManager
     @Environment(\.appLanguage) private var language
     private var state: WearableMicState { audio.wearableMic }
 
@@ -25,7 +26,7 @@ struct WearableDiagnosticsView: View {
             }
             Section {
                 NavigationLink {
-                    WearableAdvancedDiagnosticsView(audio: audio)
+                    WearableAdvancedDiagnosticsView(audio: audio, network: network)
                 } label: {
                     Text(language.text("wearable.advancedDiagnostics"))
                 }
@@ -39,6 +40,7 @@ struct WearableDiagnosticsView: View {
 @MainActor
 private struct WearableAdvancedDiagnosticsView: View {
     @ObservedObject var audio: AudioCaptureManager
+    @ObservedObject var network: NetworkManager
     @State private var captureCapabilities = AVCaptureAudioCapabilities()
     @Environment(\.appLanguage) private var language
     private var state: WearableMicState { audio.wearableMic }
@@ -123,11 +125,24 @@ private struct WearableAdvancedDiagnosticsView: View {
                 Text(language.text("wearable.experimentalNote")).foregroundStyle(.secondary)
                 Text(language.text("wearable.testInstructions")).foregroundStyle(.secondary)
             }
+            Section(language.text("wearable.aiServer")) {
+                value("wearable.aiServer", language.connectionStatus(network.wearable.connectionStatus))
+                value("wearable.ai.inFlight", network.wearable.inFlight ? "true" : "false")
+                value("wearable.ai.label", network.wearable.result.map { language.soundLabel($0.label) } ?? "—")
+                value("wearable.ai.confidence", network.wearable.result.map { language.text("main.confidence", $0.confidence * 100) } ?? "—")
+                value("wearable.ai.sentDirection", language.text((WearableDirection(rawValue: network.wearable.sentDirection ?? "") ?? .unavailable).localizationKey))
+                value("wearable.ai.bytes", "\(network.wearable.requestBytes)")
+                value("wearable.ai.latency", network.wearable.latencyMilliseconds.map { String(format: "%.0f ms", $0) } ?? "—")
+                value("wearable.ai.resultTime", network.wearable.resultTime?.formatted(date: .omitted, time: .standard) ?? "—")
+                value("wearable.ai.decision", network.wearable.result.map { $0.danger ? "true" : "false" } ?? "—")
+                if let key = network.wearable.errorKey { Text(language.text(key)).foregroundStyle(.secondary) }
+                value("wearable.ai.error", network.wearable.errorMessage ?? "—")
+            }
             Section(language.text("diagnostics.audio")) {
                 value("wearable.aiReady", language.text(state.audioReady ? "wearable.ready" : "wearable.notReady"))
                 Text("16000 Hz / mono / PCM16LE / 2.5 s")
                 Text("\(audio.aiBufferStatus.sampleCount) / \(AIInputFormat.capacity) samples")
-                Text(language.text("wearable.localOnly")).foregroundStyle(.secondary)
+                Text(language.text("wearable.ai.note")).foregroundStyle(.secondary)
                 if let error = audio.errorMessage { Text(error).foregroundStyle(.red) }
             }
         }

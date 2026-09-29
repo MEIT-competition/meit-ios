@@ -5,6 +5,7 @@ import math
 import threading
 import uuid
 from coordination import ProtocolError, identity
+from event_gate import observe_event_gate, finish_event_gate
 
 
 LOGGER = logging.getLogger("meit.auto")
@@ -101,8 +102,7 @@ class AutomaticDetection:
         self._remember(outcome, result)
         self.active = None
         self.state = "COOLDOWN"
-        self.cooldown_until = self.clock() + self.cooldown
-        self.quiet_since = self.quiet_observed = None
+        finish_event_gate(self, self.clock())
 
     def _tick(self):
         now = self.clock()
@@ -175,15 +175,8 @@ class AutomaticDetection:
             # Require observed quiet, not missing/stale reports, before another burst.
             # All fresh RMS readings count here, including phones whose buffer is not ready.
             levels = [s["corrected_rms_dbfs"] for s in selected.result["devices"].values() if s["fresh"]]
-            if levels and max(levels) < self.trigger_dbfs - 3:
-                if self.quiet_observed is None or now - self.quiet_observed > self.coordinator.rms_max_age:
-                    self.quiet_since = now
-                self.quiet_observed = now
-                if now - self.quiet_since >= self.rearm_quiet:
-                    self.armed = True
-            else:
-                self.quiet_since = self.quiet_observed = None
-            if self.state != "IDLE" or not self.armed or source is None or source["rms_dbfs"] < self.trigger_dbfs:
+            if not observe_event_gate(self, levels, source["rms_dbfs"] if source else None, now,
+                                      max_age=self.coordinator.rms_max_age, can_trigger=self.state == "IDLE"):
                 return
             event = {"event_id": str(uuid.uuid4()), "source": source, "selection": selected,
                      "deadline": now + self.audio_timeout, "cancelled": False, "times": {"triggered": now}}

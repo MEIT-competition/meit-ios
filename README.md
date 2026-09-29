@@ -25,14 +25,14 @@ ESP32의 I2S/INMP441 마이크 입력은 사용하지 않는다. 위 Phase 0–6
 
 | 모드 | 목표 경로 | 이번 patch의 실제 구현 범위 |
 |---|---|---|
-| wearable mode / 웨어러블 모드 | iPhone mic → Wi-Fi → laptop / meit-ai → laptop → ESP32 → DRV8833 → wearable motors | 로컬 microphone / RMS / AI PCM buffer / stereo diagnostics까지만 구현 |
+| wearable mode / 웨어러블 모드 | iPhone mic → Wi-Fi → laptop / meit-ai → laptop → ESP32 → DRV8833 → wearable motors | 기존 stereo 방향 + 자동 Wearable AI 추론/결과 표시, 모터 출력 미구현 |
 | iPhone mode / iPhone 모드 | iPhone mic → laptop / meit-ai → multi-iPhone direction → target iPhone vibration | 기존 inference / 자동 감지 / coordination / 진동 경로 유지 |
 
-**Wearable mode의 laptop AI 전송과 모터 출력은 아직 구현되지 않았다.**
+**Wearable mode의 laptop AI 전송은 구현됨 / 이번 변경의 Xcode·실기기 검증 대기. 모터 출력은 미구현.**
 ESP32 통신 주체는 Windows laptop bridge다. iOS에 CoreBluetooth, BLE central, ESP32 UUID,
 모터 packet 또는 iPhone→ESP32 직접 전송을 구현하지 않는다.
 
-TODO — 이후 별도 단계에서 구현할 경로:
+TODO — 이후 별도 단계에서는 아래 경로의 ESP32 command transport와 모터 출력을 구현한다:
 
 ```text
 wearable mode iPhone audio
@@ -43,18 +43,19 @@ wearable mode iPhone audio
 
 기존 `POST /infer`는 `coordination.after_inference()`를 통해 다른 iPhone에 `direction_haptic`을
 예약할 수 있다. 따라서 wearable mode는 `/infer`와 `/event/audio`를 호출하지 않는다.
-이번 patch는 Python bridge와 기존 `meit-ai`를 변경하지 않는다.
+Wearable은 전용 `/wearable/observe`와 `/wearable/infer`를 사용한다. 기존 `meit-ai` 소스와 모델은 변경하지 않는다.
 
 ## Wearable mode iPhone microphone
 
-로컬 입력과 진단 구현됨 / **이번 patch의 Xcode 빌드 및 실제 iPhone 검증 대기**.
+사용자 iPhone 16에서 stereo·AI buffer·LEFT/CENTER/RIGHT 검증 완료. **새 AI 전송 경로의 Xcode 빌드 및 실기기 검증은 대기**.
 
 - 입력은 항상 `iPhone microphone / iPhone 마이크`다. 입력 선택 toggle은 없다.
   `start listening / 감지 시작`과 `stop listening / 감지 중지`로 캡처를 시작/종료한다.
   앱 진입이나 foreground 복귀만으로 마이크를 자동 시작하지 않는다.
-- 메인은 listening/waiting, 실제 live audio RMS meter, AI server / wearable 미연결 상태,
+- 메인은 listening/waiting, 실제 live audio RMS meter, AI server 연결 상태 / wearable 미연결 상태,
   실험적 stream-semantic direction 또는 unavailable, 시작/중지 action과 diagnostics를 표시한다.
-  Wearable용 transport가 없으므로 AI server와 wearable은 모두 not connected다.
+  AI server는 Wearable 관측 요청의 실제 성공/실패를 표시하며, 모터 연결은 not connected다.
+  주소 입력과 최근 AI 결과만 추가하고, 상세 요청 정보는 고급 진단에 둔다.
   iPhone mode에서 과거 성공한 health check를 Wearable 연결 성공으로 표시하지 않는다.
 - `ContentView`가 기존 `AudioCaptureManager` 한 개를 소유한다.
   Capture ownership은 `none / iphoneMode / wearableMode`다. iPhone은 기존 AVAudioEngine/tap,
@@ -65,7 +66,7 @@ wearable mode iPhone audio
 - Wearable native CMSampleBuffer → bounded Float32 adapter → 기존 4-slot AI worker의 mono downmix
   → 16 kHz mono PCM16LE → 2.5초 ring/snapshot을 재사용한다.
   **40,000 samples / 80,000 bytes / 2.5 sec**, PCM buffer ready까지 로컬에서 준비한다.
-  Wearable에서는 registration, RMS reporting, command polling, AI upload, iPhone 진동을 시작하지 않는다.
+  Wearable은 전용 관측/AI upload만 시작한다. iPhone registration, `/device/rms`, command polling, 진동은 시작하지 않는다.
 - AVCapture input의 `.stereo` 지원을 재확인하고 mode를 설정한다. 실행 mode가 stereo이며 실제
   CMSampleBuffer PCM이 2채널 이상이어야 stereoUsable이다. AVAudioSession polar pattern / inputNode
   채널은 이 backend의 성공 조건이 아니다. 실제 출력이 mono면 성공으로 표시하지 않으며 AI PCM은 준비 가능하다.
@@ -84,10 +85,47 @@ wearable mode iPhone audio
   PCM buffer ready 및 오류를 표시한다.
 - `audio.wearableMic`의 `direction`, `channelDominance`, `audioReady`, `stereoUsable`,
   `physicalMappingVerified`는 향후 **iOS→laptop metadata/state**로 활용할 수 있다.
-  실제 transport는 없으며 iPhone→ESP32 direct adapter용 상태로 취급하지 않는다.
+  안정화된 direction은 전용 AI 요청 metadata로 사용한다. iPhone→ESP32 직접 전송은 없다.
 - Wearable 캡처가 변경한 session preference는 종료 시 복원한다. 원래 preferred channel 수가 0이면
   API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 실패하면 표시하고 다음 시작 전에 재시도한다.
   기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
+
+### Wearable automatic AI inference — device validation pending
+
+- 기존 NetworkManager/HTTP 세션과 immutable AI snapshot을 재사용한다. Wearable capture와 서버 주소가
+  준비되면 약 200 ms 간격으로 `/wearable/observe`에 RMS·buffer readiness를 보낸다. 실패 시 1초 간격으로 재확인한다.
+- RMS gate는 `bridge/event_gate.py`의 공통 함수다. 실제 bridge 설정을 그대로 사용한다:
+  기본 trigger >= -30 dBFS, quiet < -33 dBFS가 750 ms 관측되면 rearm, 추론 종료 뒤 3000 ms cooldown.
+  지속음은 다시 trigger하지 않는다. 조용한 관측이 끊기면 quiet 시간을 새로 센다.
+- bridge가 새 event를 반환할 때만 현재 AI ring에서 직전 2.5초 snapshot을 얻는다. 별도 녹음/저장/변환은 없다.
+  정확히 16 kHz / mono / signed PCM16LE / 40,000 samples / 80,000 bytes일 때 `/wearable/infer`로 보낸다.
+- snapshot 요청 시점의 stable direction을 `X-Wearable-Direction`에 전달한다. unavailable/미제공은 응답의 null이다.
+  방향은 classifier 입력이 아니며, 응답 시점의 최신 방향으로 덮어쓰지 않는다.
+- 기존 adapter `infer_auto` → `_predict` → `classifier.adapter.predict_array`와 `decision.judge`를 재사용한다.
+  label은 horn/siren/crash/normal이며, 기존 confidence >= 0.4 및 dB >= -50 조건을 통과한 위험음만 danger=true다.
+  일반음/낮은 신뢰도도 원래 label/confidence와 danger=false로 표시한다. 새 alert나 command는 만들지 않는다.
+- iOS는 한 serial task, bridge는 한 bounded pending/busy slot과 기존 model lock을 사용한다.
+  Stop/백그라운드/모드/주소 변경 시 iOS 작업·generation을 무효화한다. 이미 시작된 모델 호출은 중단하지 않지만
+  응답은 버려지고 slot은 완료까지 유지된다. 모델 실행 중 새 세션 요청은 409 후 재시도된다.
+- 기본 진단의 4개 행은 유지한다. AI label/confidence, 최근 전송 방향/바이트, 왕복 지연, 결과 시간,
+  기존 danger 판정, 마지막 오류는 고급 진단에 표시한다. 네트워크/추론 실패는 audio capture를 stop하지 않는다.
+- Windows Python 테스트: 기존 60 + Wearable 19 = 79개 모두 통과. 영어/한국어 215 keys 일치,
+  project/source references와 diff whitespace 검사를 통과했다.
+- Windows의 mock classifier 테스트는 실제 모델 정확도·Swift 컴파일·실기기 네트워크 검증을 대신하지 않는다.
+  GitHub Actions는 unsigned 앱 build만 수행하며 Swift unit tests를 실행하지 않는다.
+
+실기기 재검증:
+
+1. 기존 환경의 Windows bridge를 새 코드로 재시작한다: `.\.venv\Scripts\python.exe -B bridge/server.py --ai-path C:\meit-ai`.
+2. 새 IPA를 설치하고 Wearable에서 Windows 사설 IPv4 입력 → 감지 시작 → AI server 연결 및 40,000 samples 확인.
+3. LEFT/CENTER/RIGHT, stereo 2ch와 RMS가 계속 동작하는지 확인한다.
+4. 경적/사이렌/충돌 테스트 음원을 재생하여 label·confidence·요청 시점 방향을 확인한다.
+   bridge의 `[WEARABLE] POST /wearable/infer completed` 로그와 고급 진단의 80,000 bytes도 확인한다.
+5. 같은 소리를 계속 재생해 중복 추론이 없는지 확인하고, 조용한 구간과 cooldown 후 새 소리로 다시 추론한다.
+6. unavailable 방향에서도 AI가 동작하며 임의 방향을 채우지 않는지 확인한다.
+7. 서버 중지/복구, 추론 중 Stop/Start·모드 전환·주소 변경으로 capture 지속과 늦은 응답 폐기를 확인한다.
+8. Wearable 추론은 iPhone 진동/coordination command를 만들지 않아야 한다. iPhone mode로 돌아가 기존
+   수동·자동 추론과 기존 조건을 충족한 targeted haptic을 회귀 검증한다.
 
 ### Wearable AVCapture stereo backend
 
@@ -202,7 +240,7 @@ Orientation 요청/actual=none 문제와 AVCapture 자동 구성은 이번 patch
 - 기본 진단 네 항목은 유지하고 방향 감지 값만 locale에 맞는 Left/Center/Right/Unavailable로 표시한다.
   고급 진단에는 raw/smoothed delta, estimator state, direction, semantic mapping 확인, enter/release threshold를 표시한다.
   Raw delta는 표시용 dBFS 차이로 clamp되고, estimator delta는 EMA RMS에서 계산되어 값이 다를 수 있다.
-- 출력은 Wearable 로컬 UI/state까지만이다. Laptop 전송/AI 결과 결합/BLE/motor/haptic을 추가하지 않는다.
+- 이 방향 단계에서는 로컬 UI/state까지만 구현했다. 위 새 AI 경로는 이 값을 metadata로만 보내며 BLE/motor/haptic은 여전히 없다.
   AIInputProcessor/AIInputBuffer 및 기존 iPhone Mode는 변경하지 않았다.
 
 실기기: 고정된 portrait 상태와 일정한 소리로 LEFT/CENTER/RIGHT 위치를 반복 비교한다.

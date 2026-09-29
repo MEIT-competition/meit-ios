@@ -127,7 +127,6 @@
 "wearable.aiReady" = "PCM 버퍼 준비 상태";
 "wearable.ready" = "준비됨";
 "wearable.notReady" = "준비되지 않음";
-"wearable.localOnly" = "오디오 버퍼는 이 iPhone 안에서만 유지됩니다. AI 전송과 웨어러블 모터 출력은 아직 연결되지 않았습니다.";
 "wearable.level" = "%.1f dBFS";
 "wearable.channelDominance" = "채널 우세도";
 "wearable.dominance.channel1Dominant" = "채널 1 우세";
@@ -212,3 +211,22 @@
 "wearable.threshold.enter" = "진입 threshold";
 "wearable.threshold.release" = "해제 threshold";
 "wearable.threshold.value" = "±%.1f dB";
+
+"wearable.ai.note" = "준비된 오디오는 Windows bridge에서 자동 분석합니다. 진동과 웨어러블 모터 출력은 연결되지 않았습니다.";
+"wearable.ai.inFlight" = "오디오 분석 중";
+"wearable.ai.label" = "최근 AI 분류";
+"wearable.ai.confidence" = "신뢰도";
+"wearable.ai.sentDirection" = "최근 전송 방향";
+"wearable.ai.bytes" = "최근 요청 바이트";
+"wearable.ai.latency" = "최근 요청 지연 시간";
+"wearable.ai.resultTime" = "최근 결과 시간";
+"wearable.ai.decision" = "기존 AI 위험 판정";
+"wearable.ai.error" = "최근 추론 오류";
+"wearable.ai.error.unreachable" = "AI 서버에 연결할 수 없습니다. Wi-Fi와 bridge를 확인하세요.";
+"wearable.ai.error.timeout" = "AI 요청 시간이 초과되었습니다. 오디오 입력은 계속됩니다.";
+"wearable.ai.error.invalid_response" = "AI 서버 응답이 올바르지 않습니다. 고급 진단을 확인하세요.";
+"wearable.ai.error.incomplete_pcm" = "AI 오디오 버퍼가 불완전합니다. 다음 이벤트를 기다립니다.";
+"wearable.ai.error.inference_failed" = "분류에 실패했습니다. bridge 터미널을 확인하세요.";
+"wearable.ai.error.unsupported_label" = "분류기가 지원하지 않는 label을 반환했습니다.";
+"wearable.ai.error.stale_event" = "오디오 이벤트가 만료되었습니다. 다음 이벤트를 기다립니다.";
+"wearable.ai.error.request" = "AI 요청에 실패했습니다. 고급 진단을 확인하세요.";

@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from automatic import AutomaticDetection, increment
+from wearable import WearableEvents, direction_metadata, result_metadata
 from meit_ai_adapter import MEITAIAdapter, PAYLOAD_BYTES
 from coordination import Coordinator, ProtocolError, RMS_MAX_AGE_SECONDS, DIRECTION_MARGIN_DB
 
@@ -25,6 +26,7 @@ class BridgeServer(ThreadingHTTPServer):
         self.adapter = adapter
         self.coordinator = coordinator if coordinator is not None else Coordinator()
         self.automatic = automatic if automatic is not None else AutomaticDetection(self.coordinator)
+        self.wearable = WearableEvents(self.automatic, self.coordinator.rms_max_age)
         self.inference_lock = threading.Lock()
         self.stats_lock = threading.Lock()
         self.counters = {"rms_reports_count": 0, "inference_count": 0}
@@ -165,7 +167,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
             except ProtocolError as error:
                 self.fail(error.status, error.code, error.message)
             return
-        if self.path not in ("/infer", "/event/audio"):
+        if self.path == "/wearable/observe":
+            try:
+                self.reply(200, self.server.wearable.observe(self.json_body()))
+            except ProtocolError as error:
+                self.fail(error.status, error.code, error.message)
+            return
+        if self.path not in ("/infer", "/event/audio", "/wearable/infer"):
             self.fail(404, "not_found", "Unknown bridge endpoint.")
             return
         if self.headers.get_all("Transfer-Encoding"):
@@ -186,6 +194,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if lengths != [str(PAYLOAD_BYTES)]:
             self.fail(400, "invalid_length", "Expected exactly 80000 bytes / 40000 samples.")
             return
+        wearable = self.path == "/wearable/infer"
+        direction = None
+        wearable_ids = {}
+        if wearable:
+            try:
+                direction = direction_metadata(self.headers.get_all("X-Wearable-Direction"))
+                for name in ("X-Wearable-Session", "X-Wearable-Event"):
+                    values = self.headers.get_all(name)
+                    if values is not None and len(values) != 1:
+                        raise ProtocolError(400, "invalid_wearable_metadata", "Duplicate Wearable ID header.")
+                    wearable_ids[name] = values[0] if values else None
+            except ProtocolError as error:
+                self.fail(error.status, error.code, error.message)
+                return
         automatic = self.path == "/event/audio"
         metadata = {}
         if automatic:
@@ -204,11 +226,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self.fail(400, "incomplete_body", "PCM body is shorter than Content-Length.")
             return
         claimed = None
+        wearable_claim = None
         try:
             if automatic:
                 claimed = self.server.automatic.claim_audio(metadata)
+            if wearable:
+                wearable_claim = self.server.wearable.claim(wearable_ids["X-Wearable-Session"], wearable_ids["X-Wearable-Event"])
             with self.server.inference_lock:
-                if automatic:
+                if wearable:
+                    # Reuse decoding/predict_array and existing confidence/dB decision only.
+                    # Never select a coordination direction, complete an auto event, or queue haptics.
+                    self.server.count("inference_count")
+                    result = result_metadata(self.server.adapter.infer_auto(payload), direction)
+                    logging.getLogger("meit.wearable").info("[WEARABLE] POST /wearable/infer completed")
+                elif automatic:
                     self.server.automatic.check_inference(claimed)
                     self.server.count("inference_count")
                     result = self.server.adapter.infer_auto(payload)
@@ -231,6 +262,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             print(f"Inference failed ({type(error).__name__}).", file=sys.stderr)
             self.fail(500, "inference_failed", "Existing meit-ai inference failed; check bridge terminal.")
             return
+        finally:
+            if wearable_claim is not None:
+                self.server.wearable.finish(wearable_claim)
         self.reply(200, result)
 
     def finish_failed_auto(self, event_id):

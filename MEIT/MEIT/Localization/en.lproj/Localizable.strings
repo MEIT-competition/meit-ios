@@ -127,7 +127,6 @@
 "wearable.aiReady" = "PCM buffer ready";
 "wearable.ready" = "ready";
 "wearable.notReady" = "not ready";
-"wearable.localOnly" = "The audio buffer stays on this iPhone. AI uploads and wearable motor output are not connected.";
 "wearable.level" = "%.1f dBFS";
 "wearable.channelDominance" = "channel dominance";
 "wearable.dominance.channel1Dominant" = "channel 1 dominant";
@@ -212,3 +211,22 @@
 "wearable.threshold.enter" = "Enter threshold";
 "wearable.threshold.release" = "Release threshold";
 "wearable.threshold.value" = "±%.1f dB";
+
+"wearable.ai.note" = "Ready audio is analyzed automatically on the Windows bridge. Vibration and wearable motor output are not connected.";
+"wearable.ai.inFlight" = "Analyzing audio";
+"wearable.ai.label" = "Last AI label";
+"wearable.ai.confidence" = "Confidence";
+"wearable.ai.sentDirection" = "Last sent direction";
+"wearable.ai.bytes" = "Last request bytes";
+"wearable.ai.latency" = "Last request latency";
+"wearable.ai.resultTime" = "Last result time";
+"wearable.ai.decision" = "Existing AI danger decision";
+"wearable.ai.error" = "Last inference error";
+"wearable.ai.error.unreachable" = "Cannot reach the AI server. Check Wi-Fi and bridge.";
+"wearable.ai.error.timeout" = "AI request timed out. Audio capture continues.";
+"wearable.ai.error.invalid_response" = "Invalid AI server response. See advanced diagnostics.";
+"wearable.ai.error.incomplete_pcm" = "AI audio buffer is incomplete. Waiting for the next event.";
+"wearable.ai.error.inference_failed" = "Classifier failed. Check the bridge terminal.";
+"wearable.ai.error.unsupported_label" = "The classifier returned an unsupported label.";
+"wearable.ai.error.stale_event" = "The audio event expired. Waiting for the next event.";
+"wearable.ai.error.request" = "AI request failed. See advanced diagnostics.";

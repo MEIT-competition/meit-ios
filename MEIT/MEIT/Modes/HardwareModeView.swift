@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 struct HardwareModeView: View {
     @ObservedObject var audio: AudioCaptureManager
+    @ObservedObject var network: NetworkManager
     let isCaptureRequested: Bool
     let onStartCapture: () -> Void
     let onStopCapture: () -> Void
@@ -38,16 +39,33 @@ struct HardwareModeView: View {
 
                 VStack(alignment: .leading, spacing: 16) {
                     LabeledContent(language.text("wearable.audioInput"), value: language.text("wearable.iPhoneMicrophone"))
-                    // No wearable transport exists yet. A previous iPhone-mode health check is not
-                    // a wearable AI/motor connection and must not appear as one here.
-                    LabeledContent(language.text("wearable.aiServer"), value: language.text("status.notConnected"))
+                    TextField(language.text("settings.addressPlaceholder"), text: $network.serverAddress)
+                        .keyboardType(.decimalPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel(language.text("settings.serverAddress"))
+                    LabeledContent(language.text("wearable.aiServer"), value: language.connectionStatus(network.wearable.connectionStatus))
                     LabeledContent(language.text("hardware.wearable"), value: language.text("status.notConnected"))
-                    Text(language.text("wearable.localOnly")).font(.subheadline).foregroundStyle(.secondary)
+                    Text(language.text("wearable.ai.note")).font(.subheadline).foregroundStyle(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
                     LabeledContent(language.text("main.direction"), value: language.text(audio.wearableMic.direction.localizationKey))
                     Text(language.text("wearable.experimentalNote")).font(.subheadline).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(language.text("main.result.automatic")).font(.subheadline).foregroundStyle(.secondary)
+                    if let result = network.wearable.result {
+                        Text("\(language.soundLabel(result.label)) · \(language.text("main.confidence", result.confidence * 100))")
+                            .font(.title3)
+                        Text(language.text((WearableDirection(rawValue: result.direction ?? "") ?? .unavailable).localizationKey))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(language.text("main.result.placeholder")).foregroundStyle(.secondary)
+                    }
+                    if network.wearable.inFlight { Text(language.text("wearable.ai.inFlight")).foregroundStyle(.secondary) }
+                    if let key = network.wearable.errorKey { Text(language.text(key)).foregroundStyle(.secondary) }
                 }
                 if audio.microphonePermission == .denied {
                     Text(language.text("main.permission.subtitle")).foregroundStyle(.secondary)
@@ -88,7 +106,7 @@ struct HardwareModeView: View {
         .onAppear { audio.refreshPermission() }
         .sheet(isPresented: $showingDiagnostics) {
             NavigationStack {
-                WearableDiagnosticsView(audio: audio)
+                WearableDiagnosticsView(audio: audio, network: network)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button(language.text("common.done")) { showingDiagnostics = false }

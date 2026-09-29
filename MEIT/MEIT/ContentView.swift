@@ -30,7 +30,7 @@ struct ContentView: View {
 
                 switch operatingMode {
                 case .hardware:
-                    HardwareModeView(audio: audio, isCaptureRequested: wearableRequestID != nil,
+                    HardwareModeView(audio: audio, network: network, isCaptureRequested: wearableRequestID != nil,
                                      onStartCapture: startWearableCapture, onStopCapture: stopWearableCapture)
                 case .fallback:
                     FallbackModeView(audio: audio, network: network, devices: devices, haptics: haptics,
@@ -49,6 +49,12 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { stopWearableCapture() }
             else if phase == .active, operatingMode == .hardware { audio.refreshPermission() }
+        }
+        .onChange(of: network.serverAddress) { _, _ in
+            if operatingMode == .hardware, scenePhase == .active,
+               audio.captureOwner == .wearableMode, audio.isCapturing {
+                network.startWearableInference(from: audio)
+            }
         }
         .onChange(of: audio.captureOwner) { _, owner in
             if owner == .none, audio.captureOwner == .none, wearableCaptureTask == nil { stopWearableCapture() }
@@ -96,11 +102,13 @@ struct ContentView: View {
             await audio.startCapture(owner: .wearableMode)
             guard wearableRequestID == id else { return }
             if !audio.isCapturing || audio.captureOwner != .wearableMode { stopWearableCapture() }
+            else { network.startWearableInference(from: audio) }
             wearableCaptureTask = nil
         }
     }
 
     private func stopWearableCapture() {
+        network.stopWearableInference()
         wearableRequestID = nil
         wearableCaptureTask?.cancel()
         wearableCaptureTask = nil

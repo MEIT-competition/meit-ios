@@ -695,3 +695,71 @@ bounded history/resources가 확인된 뒤 판단한다. Windows simulated soak�
   네트워크/모델 속도의 보장값이 아니다. 합성 입력 연결 회귀이며 정확도 benchmark가 아니다.
 - Swift/Xcode project reference 및 코드 정적 검토, 전체 diff / whitespace / public 파일 민감정보 검사를 수행했다.
   실제 Swift 컴파일, 새 IPA, 실제 폰의 복구/latency/10~20분 안정성은 별도로 검증해야 한다.
+
+
+## Wearable automatic inference (isolated from iPhone coordination)
+
+Wearable uses the same running bridge/model and configured `--auto-*` timings. It does not
+register a device, report `/device/rms`, poll commands, or toggle the global iPhone Auto setting.
+The existing `/infer` and `/event/audio` behavior is unchanged.
+
+`POST /wearable/observe` accepts the existing small JSON transport:
+
+```json
+{"session_id":"<runtime UUID>","rms_dbfs":-24.0,"buffer_ready":true}
+```
+
+The response echoes `session_id` and contains a newly triggered `event_id`, otherwise null.
+IDs are runtime session/event tokens, never a persistent device identifier. A single bounded
+Wearable context reuses the extracted RMS/quiet/cooldown gate: defaults trigger >= -30,
+quiet < -33 for 750 ms, cooldown 3000 ms. Pending audio expires using the existing audio timeout.
+A returned event is delivered once; lost responses expire and require quiet rearming.
+
+`POST /wearable/infer` uses the same raw PCM headers as `/infer`:
+
+```text
+Content-Type: application/octet-stream
+X-Audio-Sample-Rate: 16000
+X-Audio-Channels: 1
+X-Audio-Format: pcm16le
+X-Audio-Samples: 40000
+Content-Length: 80000
+X-Wearable-Direction: left | center | right | unavailable
+X-Wearable-Session: <runtime UUID>
+X-Wearable-Event: <runtime UUID>
+```
+
+The body is headerless signed PCM16LE. iOS validates the immutable 2.5 s snapshot before upload;
+the bridge requires exactly 80,000 bytes with the existing metadata/encoding/body timeout checks.
+Session/event headers must be supplied together for automatic requests. For standalone endpoint
+validation both may be omitted, but this still cannot run concurrently or take a pending auto slot.
+Direction may be omitted; omitted/unavailable maps to null. Invalid or duplicate direction is 400.
+
+Example response (illustrative model output):
+
+```json
+{"label":"horn","confidence":0.96,"inference_ms":42.0,"danger":true,"direction":"left"}
+```
+
+`infer_auto` reuses `_predict` (little-endian decode, Float32 / 32768, existing `predict_array`)
+and the external `decision.judge` policy. Direction is validated/echoed metadata only. The existing
+judge produces a boolean `danger` here; no pattern/intensity command is used or sent. Current policy
+is confidence >= 0.4, dB >= -50, non-normal label. Normal/low-confidence results remain visible with
+`danger=false`. Neither `coordinator.selection/after_inference` nor `automatic.complete` is called.
+No haptic/BLE/ESP32/motor output is added.
+
+Errors retain the JSON error envelope. PCM/direction errors: 400; occupied slot or stale event: 409;
+classifier exception: sanitized 500 `inference_failed`; unsupported label or invalid result: 502.
+One Wearable inference occupies its slot until the model returns, even if the phone disconnects.
+All endpoints still share the one existing model lock. Only completion metadata is logged as
+`[WEARABLE] POST /wearable/infer completed`; audio/addresses/session IDs are not logged.
+
+Run the full existing and Wearable regression suite from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest discover -s bridge -p 'test_*.py' -v
+```
+
+Tests use classifier doubles and exercise validation, metadata echo/null, failure recovery,
+quiet/cooldown, duplicates/concurrency, no coordination calls, and the unchanged manual path.
+Real model accuracy and iPhone upload/cancellation behavior require device validation.
