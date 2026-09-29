@@ -6,6 +6,46 @@ struct WearableDiagnosticsView: View {
     @Environment(\.appLanguage) private var language
     private var state: WearableMicState { audio.wearableMic }
 
+    private var inputFormat: String {
+        // Report observed buffer channels, not the requested stereo configuration.
+        switch state.bufferChannels {
+        case 1: return language.text("wearable.mono")
+        case 2: return language.text("wearable.stereo")
+        default: return language.text("wearable.waiting")
+        }
+    }
+
+    private var directionAvailable: Bool {
+        state.stereoUsable && state.physicalMappingVerified && state.direction != .unavailable
+    }
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent(language.text("wearable.summary.audioInput"), value: language.text("wearable.iPhoneMicrophone"))
+                LabeledContent(language.text("wearable.inputFormat"), value: inputFormat)
+                LabeledContent(language.text("wearable.aiBuffer"), value: language.text(state.audioReady ? "wearable.ready" : "wearable.preparing"))
+                LabeledContent(language.text("wearable.directionSensing"), value: language.text(directionAvailable ? "wearable.available" : "wearable.unavailable"))
+            }
+            Section {
+                NavigationLink {
+                    WearableAdvancedDiagnosticsView(audio: audio)
+                } label: {
+                    Text(language.text("wearable.advancedDiagnostics"))
+                }
+            }
+        }
+        .navigationTitle(language.text("diagnostics.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+@MainActor
+private struct WearableAdvancedDiagnosticsView: View {
+    @ObservedObject var audio: AudioCaptureManager
+    @Environment(\.appLanguage) private var language
+    private var state: WearableMicState { audio.wearableMic }
+
     var body: some View {
         List {
             Section(language.text("wearable.stereoInput")) {
@@ -47,7 +87,7 @@ struct WearableDiagnosticsView: View {
                 if let error = audio.errorMessage { Text(error).foregroundStyle(.red) }
             }
         }
-        .navigationTitle(language.text("diagnostics.title"))
+        .navigationTitle(language.text("wearable.advancedDiagnostics"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

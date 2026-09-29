@@ -139,3 +139,13 @@
 "wearable.waiting" = "대기 중";
 "wearable.startHint" = "iPhone 마이크 수음을 시작합니다. 오디오는 이 iPhone 안에서만 유지됩니다.";
 "wearable.stopHint" = "마이크 수음을 중지하고 로컬 오디오 버퍼를 초기화합니다.";
+
+/* Wearable diagnostics summary and advanced navigation. */
+"wearable.summary.audioInput" = "오디오 입력";
+"wearable.inputFormat" = "입력 형식";
+"wearable.mono" = "모노";
+"wearable.stereo" = "스테레오";
+"wearable.aiBuffer" = "AI 버퍼";
+"wearable.preparing" = "준비 중";
+"wearable.directionSensing" = "방향 감지";
+"wearable.advancedDiagnostics" = "고급 진단 정보";

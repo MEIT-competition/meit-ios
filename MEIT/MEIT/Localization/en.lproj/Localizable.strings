@@ -139,3 +139,13 @@
 "wearable.waiting" = "waiting";
 "wearable.startHint" = "Starts the iPhone microphone. Audio stays on this iPhone.";
 "wearable.stopHint" = "Stops the microphone and clears the local audio buffer.";
+
+/* Wearable diagnostics summary and advanced navigation. */
+"wearable.summary.audioInput" = "Audio input";
+"wearable.inputFormat" = "Input format";
+"wearable.mono" = "Mono";
+"wearable.stereo" = "Stereo";
+"wearable.aiBuffer" = "AI buffer";
+"wearable.preparing" = "Preparing";
+"wearable.directionSensing" = "Direction sensing";
+"wearable.advancedDiagnostics" = "Advanced diagnostics";
