@@ -14,6 +14,9 @@
 		A10000000000000000000003 /* AudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* AudioCaptureManager.swift */; };
 		A10000000000000000000001 /* MEITApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* MEITApp.swift */; };
 		A10000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ContentView.swift */; };
+		A10000000000000000000009 /* OperatingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* OperatingMode.swift */; };
+		A10000000000000000000010 /* HardwareModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* HardwareModeView.swift */; };
+		A10000000000000000000011 /* FallbackModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* FallbackModeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +30,9 @@
 		A20000000000000000000001 /* MEITApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MEITApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* MEIT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MEIT.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000011 /* OperatingMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperatingMode.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* HardwareModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareModeView.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* FallbackModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackModeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +58,7 @@
 			children = (
 				A20000000000000000000001 /* MEITApp.swift */,
 				A20000000000000000000002 /* ContentView.swift */,
+				A40000000000000000000007 /* Modes */,
 				A40000000000000000000004 /* Audio */,
 				A40000000000000000000005 /* Network */,
 				A40000000000000000000006 /* Haptics */,
@@ -86,6 +93,16 @@
 			isa = PBXGroup;
 			children = (A20000000000000000000010 /* HapticManager.swift */,);
 			path = Haptics;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000007 /* Modes */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000011 /* OperatingMode.swift */,
+				A20000000000000000000012 /* HardwareModeView.swift */,
+				A20000000000000000000013 /* FallbackModeView.swift */,
+			);
+			path = Modes;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -146,6 +163,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000001 /* MEITApp.swift in Sources */,
+				A10000000000000000000009 /* OperatingMode.swift in Sources */,
+				A10000000000000000000010 /* HardwareModeView.swift in Sources */,
+				A10000000000000000000011 /* FallbackModeView.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,

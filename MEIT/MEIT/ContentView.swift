@@ -2,299 +2,73 @@ import SwiftUI
 
 @MainActor
 struct ContentView: View {
+    // One owner for the entire root view lifetime, independent of the selected mode.
     @StateObject private var audio = AudioCaptureManager()
     @StateObject private var network = NetworkManager()
     @StateObject private var devices = DeviceCoordinator()
     @StateObject private var haptics = HapticManager()
+    @AppStorage("meit.operatingMode") private var operatingMode: OperatingMode = .hardware
+    @State private var startCaptureTask: Task<Void, Never>?
     @Environment(\.scenePhase) private var scenePhase
-    @State private var snapshotInfo: String?
-    @State private var checkingSnapshot = false
-
-    private var microphoneStatus: String {
-        if audio.microphonePermission == .denied { return "Permission Denied" }
-        if audio.isCapturing { return "Capturing" }
-        if audio.isStarting { return "Requesting / Starting" }
-        return "Ready"
-    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                Text("MEIT iOS")
-                    .font(.title)
-                Text("Microphone: \(microphoneStatus)")
-                Text("Permission: \(audio.microphonePermission.rawValue)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                VStack(spacing: 8) {
-                    Text("RMS")
-                    Text(String(format: "%.1f dBFS", audio.rmsDBFS))
-                        .font(.largeTitle.monospacedDigit())
-                    Text("Native Input")
-                    Text(audio.inputFormatDescription ?? "—")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(spacing: 8) {
-                    Text("AI Input")
-                    Text("16000 Hz / mono / PCM16 (little-endian)")
-                        .font(.caption)
-                    Text("AI Buffer")
-                    Text("\(audio.aiBufferStatus.sampleCount) / \(AIInputFormat.capacity) samples")
-                    Text("\(audio.aiBufferStatus.byteCount) bytes")
-                    Text(String(format: "%.3f s", audio.aiBufferStatus.duration))
-                    Text(audio.aiBufferStatus.isReady ? "AI Buffer Ready" : (audio.isCapturing ? "Buffering..." : "Stopped"))
-                    Text("Converted total: \(audio.aiBufferStatus.totalConvertedSamples) samples")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Check Snapshot") {
-                        checkingSnapshot = true
-                        Task {
-                            if let snapshot = await audio.makeAIInputSnapshot() {
-                                snapshotInfo = "\(snapshot.sampleCount) samples / \(snapshot.byteCount) bytes / "
-                                    + String(format: "%.3f s", snapshot.duration)
-                            }
-                            checkingSnapshot = false
-                        }
-                    }
-                    .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
-                    if let snapshotInfo {
-                        Text("Snapshot: \(snapshotInfo)")
-                            .font(.caption)
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                Text("MEIT iOS").font(.title)
+                Text("Operating Mode").font(.headline)
+                Picker("Operating Mode", selection: modeSelection) {
+                    ForEach(OperatingMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
                     }
                 }
-                .monospacedDigit()
-
-                Button("Start Capture") {
-                    Task { await audio.startCapture() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(audio.isCapturing || audio.isStarting)
-
-                Button("Stop Capture") {
-                    network.cancel()
-                    audio.stopCapture()
-                }
-                .buttonStyle(.bordered)
-                .disabled(!audio.isCapturing && !audio.isStarting)
-
-                if let error = audio.errorMessage {
-                    Text("Error: \(error)")
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                Divider()
-                serverControls
-                Divider()
-                deviceControls
-                Divider()
-                automaticControls
+                .pickerStyle(.segmented)
             }
             .padding()
-        }
-        .onAppear { audio.refreshPermission() }
-        .onDisappear {
-            devices.disconnect()
-            haptics.stop()
-            audio.stopCapture()
-            network.cancel()
-        }
-        .onChange(of: audio.isCapturing) { _, capturing in
-            snapshotInfo = nil
-            if !capturing {
-                devices.cancelAutomaticSnapshot()
-                network.cancel()
-            }
-        }
-        .onChange(of: network.serverAddress) { _, _ in devices.disconnect() }
-        .onChange(of: network.connectionStatus) { _, status in
-            if status == "Connected", scenePhase == .active {
-                devices.connect(network: network, audio: audio, haptics: haptics)
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                devices.disconnect()
-                haptics.stop()
-            }
-            if phase == .background {
-                audio.stopCapture()
-                network.cancel()
-            } else if phase == .active {
-                audio.refreshPermission()
-                if network.hasConnected {
-                    devices.connect(network: network, audio: audio, haptics: haptics)
-                }
+            Divider()
+            switch operatingMode {
+            case .hardware:
+                HardwareModeView()
+            case .fallback:
+                FallbackModeView(audio: audio, network: network, devices: devices, haptics: haptics,
+                                 operatingMode: $operatingMode, onStartCapture: startCapture,
+                                 onStopCapture: stopCapture, onDeactivate: deactivateFallback)
             }
         }
     }
 
-    private var serverControls: some View {
-        VStack(spacing: 12) {
-            Text("AI Server").font(.headline)
-            HStack {
-                TextField("Windows private IPv4", text: $network.serverAddress)
-                    .keyboardType(.decimalPad)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(network.isBusy)
-                Text(": 8765")
-            }
-            Text("Last manual request: \(network.connectionStatus)")
-            Button("Test Connection") { network.testConnection() }
-                .disabled(network.isBusy)
-            Button("Send Snapshot") { network.sendSnapshot(from: audio) }
-                .buttonStyle(.borderedProminent)
-                .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
-            if network.isBusy {
-                ProgressView(network.isSending ? "Sending..." : "Testing Connection...")
-                Button("Cancel Request") { network.cancel() }
-            }
-            if let result = network.result {
-                Text("AI Result").font(.headline)
-                Text("Label: \(result.label)")
-                Text(String(format: "Confidence: %.1f%%", result.confidence * 100))
-                Text(String(format: "Inference: %.1f ms", result.inferenceMilliseconds))
-                Text("AI Direction: \(result.direction?.uppercased() ?? "UNKNOWN")")
-                if let margin = result.directionMarginDB {
-                    Text(String(format: "AI Direction Margin: %.1f dB", margin))
-                }
-            }
-            if let error = network.errorMessage {
-                Text("Network Error: \(error)")
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
+    private var modeSelection: Binding<OperatingMode> {
+        Binding(get: { operatingMode }, set: { next in
+            guard next != operatingMode else { return }
+            // Stop immediately, before rendering Hardware. onDisappear repeats this safely.
+            if next == .hardware { deactivateFallback() }
+            operatingMode = next
+        })
+    }
+
+    private func startCapture() {
+        guard operatingMode == .fallback, scenePhase == .active,
+              !audio.isCapturing, !audio.isStarting else { return }
+        startCaptureTask?.cancel()
+        startCaptureTask = Task {
+            // A queued Start tap must not start recording after a mode switch/Stop.
+            guard !Task.isCancelled else { return }
+            await audio.startCapture()
         }
     }
 
-    private var automaticControls: some View {
-        VStack(spacing: 12) {
-            Text("Automatic Detection").font(.headline)
-            Text(devices.autoStatus.map { $0.enabled ? "ON" : "OFF" } ?? "Unavailable")
-            Text("Auto State: \(devices.autoStatus?.state.replacingOccurrences(of: "_", with: " ") ?? "Unavailable")")
-            if let status = devices.autoStatus, status.enabled, !status.armed,
-               status.state == "IDLE" || status.state == "COOLDOWN" {
-                Text("Waiting for quiet before rearming").font(.caption)
-            }
-            Button(devices.autoStatus?.enabled == true ? "Stop Auto Detection" : "Start Auto Detection") {
-                devices.setAutomaticDetection(devices.autoStatus?.enabled != true)
-            }
-            .disabled(!devices.isRegistered || devices.changingAuto
-                      || (devices.autoStatus?.enabled != true && !audio.isCapturing))
-            Text("Global bridge setting; affects all connected phones.").font(.caption)
-            if let active = devices.autoStatus?.active_event {
-                Text("Current source: \(active.source_role.uppercased())")
-            }
-            if let event = devices.autoStatus?.last_event {
-                Text("Last Auto Event").font(.headline)
-                Text("Source: \(event.source_role.uppercased())")
-                Text("Status: \(event.outcome.replacingOccurrences(of: "_", with: " "))")
-                if let result = event.result {
-                    Text("Label: \(result.label)")
-                    Text(String(format: "Confidence: %.1f%%", result.confidence * 100))
-                }
-                Text("Direction: \(event.direction.uppercased())")
-            }
-            if let message = devices.autoMessage { Text(message).font(.caption) }
-            automaticDiagnostics
-        }
+    private func stopCapture() {
+        startCaptureTask?.cancel()
+        startCaptureTask = nil
+        devices.cancelAutomaticSnapshot()
+        network.cancel()
+        audio.stopCapture()
     }
 
-    private func diagnosticValue(_ label: String, _ value: Double?, unit: String = "ms") -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value.map { String(format: "%.1f %@", $0, unit) } ?? "—")
-                .monospacedDigit()
-        }
-        .font(.caption)
-    }
-
-    private var automaticDiagnostics: some View {
-        DisclosureGroup("Diagnostics") {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Server (poll): \(devices.pollingStatus == "Active" ? "Connected" : devices.pollingStatus)")
-                    Text("Registration: \(devices.registration)")
-                    Text("RMS reporting: \(devices.rmsStatus)")
-                    Text("Command polling: \(devices.pollingStatus)")
-                    Text("Auto control: \(devices.autoStatus == nil ? "Unavailable" : "Synced")")
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        diagnosticValue("Last successful contact", devices.lastSuccessfulContactUptime.map {
-                            max(0, ProcessInfo.processInfo.systemUptime - $0)
-                        }, unit: "s ago")
-                    }
-                    if let error = devices.lastNetworkError { Text("Last network error: \(error)").foregroundStyle(.red) }
-                }
-                .font(.caption)
-                if let status = devices.autoStatus {
-                    VStack(alignment: .leading, spacing: 4) {
-                        diagnosticValue("Current local RMS", audio.rmsDBFS, unit: "dBFS")
-                        diagnosticValue("Trigger", status.trigger_dbfs, unit: "dBFS")
-                        diagnosticValue("Rearm below", status.release_dbfs, unit: "dBFS")
-                        diagnosticValue("Cooldown remaining", status.cooldown_remaining_ms)
-                        Text("Armed: \(status.armed ? "yes" : "no") / Waiting for quiet: \(status.waiting_for_quiet == true ? "yes" : "no")")
-                        diagnosticValue("Quiet observed", status.quiet_elapsed_ms)
-                        diagnosticValue("Quiet required", status.rearm_quiet_ms)
-                    }
-                    .font(.caption)
-                    if let event = status.active_event ?? status.last_event {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Event: \(event.event_id.prefix(8)) / Source: \(event.source_role.uppercased())")
-                            diagnosticValue("Trigger RMS", event.trigger_rms_dbfs, unit: "dBFS")
-                            Text("Reason: \(event.trigger_reason ?? "Unavailable")")
-                            Text("Timestamps: ms since this bridge started")
-                            ForEach(["triggered", "snapshot_requested", "snapshot_received", "inference_started", "inference_completed"], id: \.self) { key in
-                                diagnosticValue(key.replacingOccurrences(of: "_", with: " "), event.timestamps_ms?[key])
-                            }
-                            if let timing = event.latency {
-                                diagnosticValue("Trigger → command queued", timing.trigger_to_command_ms)
-                                diagnosticValue("Command queued → audio received", timing.command_to_audio_ms)
-                                diagnosticValue("Audio → inference start", timing.audio_to_inference_start_ms)
-                                diagnosticValue("Inference (server)", timing.inference_ms)
-                                diagnosticValue("Total event", timing.total_event_ms)
-                            }
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-        }
-    }
-
-    private var deviceControls: some View {
-        VStack(spacing: 12) {
-            Text("Device").font(.headline)
-            Picker("Device Role", selection: $devices.role) {
-                ForEach(DeviceRole.allCases, id: \.self) { role in
-                    Text(role.rawValue.uppercased()).tag(role)
-                }
-            }
-            .pickerStyle(.menu)
-            Text("Device ID: \(devices.deviceID.prefix(8))...").font(.caption)
-            Text("Registration: \(devices.registration)")
-            Text("RMS: \(devices.rmsStatus)").font(.caption)
-            Text("Direction").font(.headline)
-            Text(devices.direction?.direction.uppercased() ?? "UNKNOWN")
-            if let direction = devices.direction {
-                if let margin = direction.marginDB {
-                    Text(String(format: "Margin: %.1f dB", margin))
-                }
-                Text(direction.detail).font(.caption)
-            }
-            Button("Test Haptic") { haptics.play() }
-                .disabled(!haptics.isSupported)
-            Text("Haptic: \(haptics.isSupported ? haptics.status : "Unsupported")")
-                .font(.caption)
-            Button("Test Direction + Haptic") { devices.testDirectionHaptic() }
-                .disabled(!devices.isRegistered || devices.testingDirection || network.isBusy)
-            if let result = devices.testResult { Text(result).font(.caption) }
-            if let error = devices.networkError { Text(error).foregroundStyle(.red) }
-            if let error = haptics.errorMessage { Text("Haptic Error: \(error)").foregroundStyle(.red) }
-        }
+    private func deactivateFallback() {
+        // Existing generation guards invalidate late network/permission completions.
+        // Keep address, role and device ID; do not change the bridge's global Auto setting.
+        devices.disconnect()
+        haptics.stop()
+        stopCapture()
     }
 }

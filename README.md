@@ -26,6 +26,60 @@ Phase 3에서는 수동 HTTP snapshot 전송과 기존 meit-ai 결과 표시를 
 Phase 4에서는 네 역할의 RMS 보고·방향 추정과 해당 iPhone 진동을 추가한다.
 Phase 5에서는 bridge가 자동 이벤트와 단일 audio source를 선택한다. TDoA와 녹음 파일 저장은 구현하지 않는다.
 
+## Operating Modes
+
+하나의 앱에서 상단 segmented picker로 **Hardware / iPhone Fallback** 운용 경로를 선택한다.
+
+| 모드 | 현재 범위 |
+|---|---|
+| Hardware Mode | UI shell implemented / meit-ee integration pending |
+| iPhone Fallback | 기존 Phase 0–6A 구현과 진단 화면 유지 |
+
+- `OperatingMode`의 `hardware` / `fallback` 값을 `@AppStorage("meit.operatingMode")`로
+  UserDefaults에 저장한다. 첫 실행 기본값은 Hardware이며 이후 마지막 선택을 복원한다.
+- `ContentView`가 AudioCaptureManager, NetworkManager, DeviceCoordinator, HapticManager를
+  각각 하나의 `@StateObject`로 소유한다. Fallback은 같은 객체를 `@ObservedObject`로 받는다.
+- Fallback → Hardware 전환 시 capture 및 대기 중 Start/Check Snapshot 작업, 수동 요청,
+  자동 snapshot/upload, 등록·RMS 보고·command polling 및 후속 진동을 정리한다.
+  기존 capture/session ID 검사가 늦은 권한·네트워크 응답을 무효화한다.
+- 주소·role·UUID와 서버 설정을 삭제하지 않는다. 주소는 기존처럼 앱 세션 안에서 유지하고,
+  role·UUID는 기존 UserDefaults 저장을 유지한다. 다른 폰에도 영향을 주는 서버의 전역 Auto 설정은
+  변경하지 않는다. 이미 서버가 수락한 추론이나 OS에 전달된 한 번의 진동은 취소할 수 없다.
+- Hardware → Fallback 복귀 시 이전 연결 성공 주소가 있으면 coordination을 다시 연결한다.
+  마이크는 자동 시작하지 않으며 사용자가 **Start Capture**를 눌러야 한다.
+- Hardware 화면은 Not Connected / —와 비활성 Connect Hardware / Test Motors 버튼만 표시한다.
+  iPhone 마이크·PCM 전송·role·진동, ESP32/BLE 통신, 모의 데이터는 사용하지 않는다.
+
+Hardware Mode TODO (이번 단계 미구현):
+
+- ESP32-S3 / meit-ee connection 및 hardware direction input
+- AI result synchronization
+- motor status 및 motor test command
+- system start/stop
+
+### 모드 분리 검증
+
+Windows에서 기존 bridge 테스트 **60개 통과**. 프로젝트 소스 참조·중복 등록, 객체 소유권,
+전환 정리 경로 및 전체 diff를 정적 검토했다. Audio/Network/Haptics 내부, Python bridge,
+기존 meit-ai, unsigned IPA workflow는 변경하지 않았다.
+**이번 모드 분리의 Xcode 컴파일과 실제 iPhone 동작은 아직 검증하지 않았다.**
+
+1. 기존 GitHub Actions를 수동 실행해 Modes의 세 Swift 파일 컴파일, 링크 및 unsigned IPA 생성을 확인한다.
+2. 새 IPA 설치 후 저장된 선택이 없으면 Hardware인지, 미연결 표시와 두 비활성 버튼만 있는지 확인한다.
+   이 상태에서 마이크 권한 요청·capture·RMS 보고·command polling이 시작되면 안 된다.
+3. Fallback을 선택하고 아래 Phase 1–6A 및 bridge 문서의 기존 테스트를 수행한다.
+   Start → Buffer Ready, 수동 inference, Auto, registration/RMS, 진동, Diagnostics를 확인한다.
+4. capture/Check Snapshot/수동 업로드/자동 업로드/진동 중 각각 Hardware로 전환한다.
+   마이크와 반복 요청이 멈추고 이후 진동 burst가 이어지지 않는지 확인한다.
+   Start 직후 전환, 빠른 반복 전환, 권한 요청 후 복귀·전환도 검사한다.
+5. Fallback 복귀 시 주소·role·UUID가 유지되고 capture는 정지 상태인지 확인한다.
+   Start를 눌러 새 buffer가 채워지고 연결·Auto·수동 요청이 정상 복구되는지 확인한다.
+6. 두 모드 각각에서 앱 종료·재실행 시 마지막 선택을 복원하는지 확인한다.
+   background/foreground 및 10~20분 Fallback 안정성 테스트도 수행한다.
+
+Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A single-iPhone stabilization의
+실기기 검증과 Phase 6B four-iPhone final calibration도 기존 대기 상태를 유지한다.
+
 ## 프로젝트
 
 - SwiftUI, iPhone 전용, deployment target **iOS 17.0** 이상: iPhone 15/16 대상.
@@ -43,6 +97,10 @@ meit-ios/
 │       ├── MEITApp.swift
 │       ├── ContentView.swift
 │       ├── Info.plist
+│       ├── Modes/
+│       │   ├── OperatingMode.swift
+│       │   ├── HardwareModeView.swift
+│       │   └── FallbackModeView.swift
 │       ├── Network/
 │       │   ├── NetworkManager.swift
 │       │   └── DeviceCoordinator.swift
@@ -66,7 +124,9 @@ meit-ios/
 └── README.md
 ```
 
-`MEITApp.swift`는 앱 진입점, `ContentView.swift`는 상태·버튼·오류를 표시하는 화면이다.
+`MEITApp.swift`는 앱 진입점, `ContentView.swift`는 공통 객체 소유·모드 선택·전환 정리를 담당한다.
+`Modes/OperatingMode.swift`는 저장 값과 표시 이름, `HardwareModeView.swift`는 하드웨어 UI shell,
+`FallbackModeView.swift`는 기존 상태·버튼·오류·Diagnostics 화면을 담당한다.
 `Audio/AudioCaptureManager.swift`는 기존 권한·세션·엔진·RMS를 유지하며 AI 처리 수명주기를 연결한다.
 `Audio/AIInputProcessor.swift`는 제한된 PCM 복사 큐와 AVAudioConverter를 관리한다.
 `Audio/AIInputBuffer.swift`는 규격, 40,000-sample ring buffer, immutable snapshot을 정의한다.
