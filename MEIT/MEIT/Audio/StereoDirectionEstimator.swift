@@ -1,8 +1,9 @@
 import Foundation
 
-// Experimental defaults, not calibrated danger/AI thresholds. Amplitudes are linear RMS.
+// Wearable experimental defaults from device trials, not AI thresholds or physical calibration.
 struct StereoDirectionConfiguration: Sendable {
-    var marginDB = 3.0
+    var enterThresholdDB = 0.7
+    var releaseThresholdDB = 0.3
     var silenceDBFS = -65.0
     var smoothingAlpha = 0.25
 }
@@ -13,11 +14,13 @@ enum WearableDirection: String, Sendable {
     var localizationKey: String { "wearable.direction.\(rawValue)" }
 }
 
-// No audio/session/UI dependency. Left/right refer to logical channels, not verified physical sides.
+// No audio/session/UI dependency. The caller must gate unverified stream semantics.
 struct StereoDirectionEstimator {
     let configuration: StereoDirectionConfiguration
     private var smoothedLeft: Double?
     private var smoothedRight: Double?
+    private(set) var state: WearableDirection = .unavailable
+    private(set) var smoothedDeltaDB: Double?
 
     init(configuration: StereoDirectionConfiguration = .init()) {
         self.configuration = configuration
@@ -26,39 +29,64 @@ struct StereoDirectionEstimator {
     mutating func reset() {
         smoothedLeft = nil
         smoothedRight = nil
+        smoothedDeltaDB = nil
+        state = .unavailable
     }
 
     mutating func update(leftRMS: Double, rightRMS: Double, stereoUsable: Bool) -> WearableDirection {
-        guard stereoUsable, Self.valid(leftRMS), Self.valid(rightRMS),
+        guard stereoUsable, Self.signalIsUsable(leftRMS, rightRMS, configuration),
               configuration.smoothingAlpha.isFinite,
-              (0...1).contains(configuration.smoothingAlpha), configuration.smoothingAlpha > 0,
-              Self.classify(leftRMS: leftRMS, rightRMS: rightRMS, configuration: configuration) != .unavailable else {
-            // Quiet/invalid input immediately clears old direction instead of decaying through CENTER.
+              (0...1).contains(configuration.smoothingAlpha), configuration.smoothingAlpha > 0 else {
+            // Raw silence/invalid input clears history immediately, without EMA decay.
             reset()
-            return .unavailable
+            return state
         }
         let alpha = configuration.smoothingAlpha
         let left = smoothedLeft.map { $0 + alpha * (leftRMS - $0) } ?? leftRMS
         let right = smoothedRight.map { $0 + alpha * (rightRMS - $0) } ?? rightRMS
+        guard Self.signalIsUsable(left, right, configuration) else {
+            reset()
+            return state
+        }
         smoothedLeft = left
         smoothedRight = right
-        return Self.classify(leftRMS: left, rightRMS: right, configuration: configuration)
+        smoothedDeltaDB = Self.deltaDB(left, right)
+        state = Self.classify(leftRMS: left, rightRMS: right,
+                              configuration: configuration, previousState: state)
+        return state
     }
 
+    // One hysteresis step on already-smoothed RMS. update() is the production entry point.
     static func classify(leftRMS: Double, rightRMS: Double,
-                         configuration: StereoDirectionConfiguration = .init()) -> WearableDirection {
-        guard valid(leftRMS), valid(rightRMS), configuration.marginDB.isFinite,
-              configuration.marginDB > 0, configuration.silenceDBFS.isFinite,
-              configuration.silenceDBFS < 0 else { return .unavailable }
-        let floor = pow(10, configuration.silenceDBFS / 20)
-        guard max(leftRMS, rightRMS) > floor else { return .unavailable }
-        if leftRMS == 0 { return .right }
-        if rightRMS == 0 { return .left }
-        // 20 log10(L) - 20 log10(R) == 20 log10(L/R); never multiply dB values.
-        let difference = 20 * (log10(leftRMS) - log10(rightRMS))
-        if difference > configuration.marginDB { return .left }
-        if difference < -configuration.marginDB { return .right }
-        return .center
+                         configuration: StereoDirectionConfiguration = .init(),
+                         previousState: WearableDirection = .center) -> WearableDirection {
+        guard signalIsUsable(leftRMS, rightRMS, configuration) else { return .unavailable }
+        let difference = deltaDB(leftRMS, rightRMS)
+        switch previousState {
+        case .left:
+            return difference >= configuration.releaseThresholdDB ? .left : .center
+        case .right:
+            return difference <= -configuration.releaseThresholdDB ? .right : .center
+        case .center, .unavailable:
+            if difference >= configuration.enterThresholdDB { return .left }
+            if difference <= -configuration.enterThresholdDB { return .right }
+            return .center
+        }
+    }
+
+    private static func signalIsUsable(_ left: Double, _ right: Double,
+                                       _ configuration: StereoDirectionConfiguration) -> Bool {
+        guard valid(left), valid(right), configuration.enterThresholdDB.isFinite,
+              configuration.releaseThresholdDB.isFinite, configuration.releaseThresholdDB >= 0,
+              configuration.enterThresholdDB > configuration.releaseThresholdDB,
+              configuration.silenceDBFS.isFinite, configuration.silenceDBFS < 0 else { return false }
+        return max(left, right) > pow(10, configuration.silenceDBFS / 20)
+    }
+
+    private static func deltaDB(_ left: Double, _ right: Double) -> Double {
+        // Difference of dB levels of EMA-smoothed LINEAR RMS, not subtraction of amplitudes.
+        // The existing -100 dBFS meter floor handles a zero channel; the silence gate is separate.
+        20 * (log10(max(left, 0.00001)) - log10(max(right, 0.00001)))
     }
 
     static func dbFS(_ amplitude: Double) -> Double {

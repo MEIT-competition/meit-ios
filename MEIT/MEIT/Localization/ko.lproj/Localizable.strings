@@ -101,9 +101,9 @@
 "wearable.estimatedDirection" = "추정 방향 · 실험용";
 "wearable.direction.left" = "왼쪽";
 "wearable.direction.right" = "오른쪽";
-"wearable.direction.center" = "중앙";
+"wearable.direction.center" = "가운데";
 "wearable.direction.unavailable" = "사용 불가";
-"wearable.experimentalNote" = "채널 우세도는 실험값입니다. 채널 매핑을 검증하기 전까지 실제 방향은 확인할 수 없습니다.";
+"wearable.experimentalNote" = "실험적 방향은 표준 Stereo 스트림 의미와 smoothing된 채널 레벨을 사용하며 물리 마이크 위치를 뜻하지 않습니다. 가운데는 비슷한 레벨이며 정면 음원을 확정하지 않습니다.";
 "wearable.inputPort" = "입력 포트";
 "wearable.dataSource" = "선택된 데이터 소스";
 "wearable.maximumChannels" = "최대 입력 채널 수";
@@ -200,7 +200,15 @@
 "wearable.layout.channel0" = "Channel 0 semantic label";
 "wearable.layout.channel1" = "Channel 1 semantic label";
 "wearable.layout.note" = "스트림 semantic label은 특정 물리 마이크 위치나 검증된 물리 LEFT/RIGHT 매핑을 의미하지 않습니다. 제공되지 않거나 해석할 수 없는 label은 unknown입니다.";
-"wearable.channelDelta" = "채널 차이 · CH1 − CH2";
+"wearable.channelDelta" = "Raw 채널 차이 · CH1 − CH2";
 "wearable.channelDelta.value" = "%+.1f dB";
 
 "wearable.layout.name" = "채널 layout";
+
+/* Experimental Wearable semantic direction; thresholds only in advanced diagnostics. */
+"wearable.channelDelta.smoothed" = "Smoothed 채널 차이 · CH1 − CH2";
+"wearable.estimatorState" = "현재 estimator 상태";
+"wearable.semanticMapping" = "표준 Stereo semantic mapping";
+"wearable.threshold.enter" = "진입 threshold";
+"wearable.threshold.release" = "해제 threshold";
+"wearable.threshold.value" = "±%.1f dB";

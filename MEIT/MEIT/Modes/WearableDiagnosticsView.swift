@@ -15,17 +15,13 @@ struct WearableDiagnosticsView: View {
         }
     }
 
-    private var directionAvailable: Bool {
-        state.stereoUsable && state.physicalMappingVerified && state.direction != .unavailable
-    }
-
     var body: some View {
         List {
             Section {
                 LabeledContent(language.text("wearable.summary.audioInput"), value: language.text("wearable.iPhoneMicrophone"))
                 LabeledContent(language.text("wearable.inputFormat"), value: inputFormat)
                 LabeledContent(language.text("wearable.aiBuffer"), value: language.text(state.audioReady ? "wearable.ready" : "wearable.preparing"))
-                LabeledContent(language.text("wearable.directionSensing"), value: language.text(directionAvailable ? "wearable.available" : "wearable.unavailable"))
+                LabeledContent(language.text("wearable.directionSensing"), value: language.text(state.direction.localizationKey))
             }
             Section {
                 NavigationLink {
@@ -116,6 +112,11 @@ private struct WearableAdvancedDiagnosticsView: View {
                 level("wearable.channel2RMS", state.channel2RMS)
                 level("wearable.channel2Peak", state.channel2Peak)
                 value("wearable.channelDelta", state.channelDeltaDB.map { language.text("wearable.channelDelta.value", $0) } ?? "—")
+                value("wearable.channelDelta.smoothed", state.smoothedDeltaDB.map { language.text("wearable.channelDelta.value", $0) } ?? "—")
+                value("wearable.estimatorState", language.text(state.estimatorState.localizationKey))
+                value("wearable.semanticMapping", capabilityText(state.stereoSemanticMappingAvailable))
+                value("wearable.threshold.enter", language.text("wearable.threshold.value", state.directionConfiguration.enterThresholdDB))
+                value("wearable.threshold.release", language.text("wearable.threshold.value", state.directionConfiguration.releaseThresholdDB))
                 value("wearable.channelDominance", language.text(state.channelDominance.localizationKey))
                 value("wearable.logicalMapping", language.text("wearable.mappingUnverified"))
                 value("wearable.estimatedDirection", language.text(state.direction.localizationKey))

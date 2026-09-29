@@ -326,9 +326,12 @@ final class AudioCaptureManager: ObservableObject {
         wearableMic.channel2RMS = usable ? reading.channel2RMS : nil
         wearableMic.channel1Peak = usable ? reading.channel1Peak : nil
         wearableMic.channel2Peak = usable ? reading.channel2Peak : nil
-        wearableMic.channelDominance = StereoChannelDominance(estimate: wearableEstimator.update(
+        let estimate = wearableEstimator.update(
             leftRMS: reading.channel1RMS ?? .nan, rightRMS: reading.channel2RMS ?? .nan,
-            stereoUsable: usable))
+            stereoUsable: usable && wearableMic.stereoSemanticMappingAvailable)
+        wearableMic.estimatorState = estimate
+        wearableMic.smoothedDeltaDB = wearableEstimator.smoothedDeltaDB
+        wearableMic.channelDominance = StereoChannelDominance(estimate: estimate)
     }
 
     private func stopForSystemEvent(_ message: String) {

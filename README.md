@@ -53,7 +53,7 @@ wearable mode iPhone audio
   `start listening / 감지 시작`과 `stop listening / 감지 중지`로 캡처를 시작/종료한다.
   앱 진입이나 foreground 복귀만으로 마이크를 자동 시작하지 않는다.
 - 메인은 listening/waiting, 실제 live audio RMS meter, AI server / wearable 미연결 상태,
-  direction unavailable, 시작/중지 action과 diagnostics를 표시한다.
+  실험적 stream-semantic direction 또는 unavailable, 시작/중지 action과 diagnostics를 표시한다.
   Wearable용 transport가 없으므로 AI server와 wearable은 모두 not connected다.
   iPhone mode에서 과거 성공한 health check를 Wearable 연결 성공으로 표시하지 않는다.
 - `ContentView`가 기존 `AudioCaptureManager` 한 개를 소유한다.
@@ -71,13 +71,14 @@ wearable mode iPhone audio
   채널은 이 backend의 성공 조건이 아니다. 실제 출력이 mono면 성공으로 표시하지 않으며 AI PCM은 준비 가능하다.
 - 실제 stereo일 때 기존 RMS meter의 약 100 ms window에서 channel 1/2 RMS와 absolute peak를 계산한다.
   planar/interleaved stride와 기존 aggregate RMS/live meter를 유지하며 별도 DSP pipeline을 추가하지 않는다.
-- `StereoDirectionEstimator`의 linear RMS EMA(alpha=0.25), dB difference, margin=3 dB,
-  silence=-65 dBFS는 그대로다. 실기기 보정값이 아닌 실험 기본값이며 기존 AI threshold와 무관하다.
-  진단용 출력은 channel 1 dominant / channel 2 dominant / balanced / unavailable이다.
-  무음·invalid·mono에서 unavailable 및 smoothing reset, margin과 같은 차이는 balanced다.
-- `stereoUsable != physicalMappingVerified`. 물리 mapping은 현재 항상 false이며,
-  **user-facing direction과 상태의 direction은 항상 UNAVAILABLE**이다.
-  Balanced는 실제 정면을 의미하지 않는다. 실제 좌우 매핑을 추측하지 않는다.
+- `StereoDirectionEstimator`의 linear RMS EMA(alpha=0.25), silence=-65 dBFS는 유지한다.
+  기존 3 dB margin을 Wearable 실측 실험용 진입 ±0.7 dB / 해제 ±0.3 dB hysteresis로 교체했다.
+  CH1=PCM channel 0, CH2=PCM channel 1이다. EMA된 선형 RMS를 dB로 바꾼 차이로 분류한다.
+  무음·invalid·mono·semantic mapping 상실은 unavailable 및 smoothing/state reset이다.
+- `stereoSemanticMappingAvailable`은 원본 standard Stereo tag와 2채널 ASBD 확인을 뜻한다.
+  `physicalMappingVerified`는 별도의 물리 calibration이며 계속 false다. 기존에는 물리 방향 노출을 막는
+  gate로 사용했지만, 이제 UI의 실험적 semantic direction과 구분한다. 특정 마이크 위치를 추측하지 않는다.
+  기본 진단과 Wearable 메인의 방향은 Left / Center / Right / Unavailable이다. Center는 실제 정면 보장이 아니다.
 - Diagnostics는 iPhone 입력 label, route, session/node/buffer channels, stereo usable,
   channel 1/2 RMS·peak, channel dominance, polar patterns/orientation, physical mapping,
   PCM buffer ready 및 오류를 표시한다.
@@ -113,7 +114,7 @@ wearable mode iPhone audio
   새 resampler/ring은 없다. 기존 AIInputProcessor가 mono downmix / 16 kHz PCM16LE 변환을 수행한다.
 - 기존 NativeRMSMeter와 StereoDirectionEstimator를 공유한다. Overall RMS는 모든 채널의 평균 power의
   제곱근이며 반대 위상도 상쇄하지 않는다. AI mono mix는 기존 signed sample 평균이다. 두 정의를 구분한다.
-  CH1/CH2 RMS·peak와 dominance만 실험하며 physical mapping=false, physical direction=UNAVAILABLE이다.
+  CH1/CH2 RMS·peak 및 semantic direction을 실험한다. Physical mapping은 계속 false이며 motor 방향을 검증하지 않는다.
 - 기본 진단 네 항목은 유지한다. 고급 진단의 probe mode는 조회용으로 남고, 별도로 active capture mode와
   실제 PCM rate/format/flags/bits/interleaving을 표시한다. Input node는 이 backend에서 사용하지 않는다고 표시한다.
 - Stop은 captureID를 즉시 무효화하고 UI를 초기화한다. Session queue에서 delegate 해제 → delivery drain
@@ -157,27 +158,60 @@ preferred orientation을 저장/복원했지만 시작 전에 특정 orientation
   크기/채널 수 검증 실패, metadata 부재, 해석 불가 시 unknown이다. 채널 수만으로 Left/Right를 만들지 않는다.
   Label Left/Right가 있어도 stream role일 뿐 특정 물리 마이크 위치나 물리 방향으로 사용하지 않는다.
   PCM 변환/채널 순서를 바꾸지 않는다. 이 metadata patch는 actual orientation=none 문제를 수정하거나
-  audio-session 자동 구성, estimator threshold, physical mapping을 변경하지 않는다.
+  audio-session 자동 구성이나 physical mapping을 변경하지 않는다. 이후 semantic estimator patch는 아래 별도 절에 설명한다.
   근거: [Apple standard Stereo ordering](https://developer.apple.com/documentation/coreaudiotypes/kaudiochannellayouttag_stereo).
 - 고급 진단에 requested/preferred/actual, 실제 AVCapture audio-session flags, portrait confirmed,
   channel 0/1 label, layout tag, channel delta를 표시한다. 기본 진단과 iPhone Mode UI는 유지한다.
 - Channel delta는 표시된 CH1 RMS dBFS − CH2 RMS dBFS다. 기존 -100...0 dBFS clamp를 사용하므로
-  silence는 유한 값(양쪽 silence면 0 dB)이며 방향 판정이 아니다. Estimator의 EMA/threshold는 그대로다.
+  silence는 유한 값(양쪽 silence면 0 dB)이다. 방향은 raw delta가 아닌 아래 EMA/hysteresis 상태를 따른다.
 - 종료 시 기존 stop/drain barrier 후 저장한 orientation을 포함한 session preferences를 복원한다.
   다음 backend는 정리 완료를 기다린다. 이 patch는 AI converter/ring, iPhone mode, network/AI 서버 연결을 변경하지 않는다.
 
 실기기 절차: 폰을 움직이지 않고 같은 음원 위치/음량으로 Start → 소리 → 기록 → Stop을 **최소 5회** 반복한다.
 각 회차에 requested/preferred/actual, active mode, 실제 채널 수, 두 session flags, channel 0/1 label,
-layout tag, CH1/CH2 RMS·peak, delta, dominance를 기록한다. 세 orientation 모두 portrait여야 하며,
-같은 위치 음원에서 채널 대응이 뒤집히지 않는지 확인한다. Physical direction은 계속 UNAVAILABLE이다.
+layout tag, CH1/CH2 RMS·peak, delta, dominance를 기록한다. Portrait orientation confirmed는 세 값이 모두
+portrait일 때만 true이며 아래 semantic 방향의 활성 조건과는 별개다. 같은 위치 음원에서 채널 대응이
+뒤집히지 않는지 확인한다. Physical mapping은 여전히 미검증이다.
 40,000/40,000 samples 유지, background/foreground와 iPhone Mode 왕복 후 기존 기능도 확인한다.
-안정화 이후 별도 실험에서 LEFT/CENTER/RIGHT 위치별 delta 분포를 측정한다. 이번에는 mapping하지 않는다.
+후속 사용자 실험에서 LEFT/CENTER/RIGHT delta 경향이 확인되어 아래 semantic direction 실험을 추가했다. 물리 마이크 위치는 mapping하지 않는다.
 Windows 검사로 orientation 안정성이나 Swift/Xcode build 성공을 주장하지 않는다.
 
 근거: [input orientation](https://developer.apple.com/documentation/avfaudio/avaudiosession/inputorientation),
 [preferred orientation](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinputorientation(_:)),
 [automatic configuration](https://developer.apple.com/documentation/avfoundation/avcapturesession/automaticallyconfiguresapplicationaudiosession),
 [channel layout](https://developer.apple.com/documentation/coremedia/cmaudioformatdescriptiongetchannellayout(_:sizeout:)).
+
+### Wearable RMS semantic direction — device validation pending
+
+사용자 관측: LEFT delta 약 0...+3 dB, CENTER 약 0...+0.5 dB, RIGHT 약 0...−2 dB.
+범위가 겹치므로 ±0.7/±0.3 dB는 실험 초기값이며 방향 정확도를 보장하는 calibration은 아니다.
+Orientation 요청/actual=none 문제와 AVCapture 자동 구성은 이번 patch에서 변경하지 않는다.
+
+- 기존 estimator 하나만 사용한다. 선형 CH1/CH2 RMS EMA(alpha=0.25) 후
+  `20 log10(smoothed CH1) − 20 log10(smoothed CH2)`를 사용한다. 0 근처는 기존 meter의 -100 dBFS floor다.
+- CENTER(또는 초기 unavailable)에서 delta >= +0.7이면 LEFT, <= -0.7이면 RIGHT, 그 사이는 CENTER.
+  LEFT는 >= +0.3에서 유지, 그 미만이면 CENTER. RIGHT는 <= -0.3에서 유지, 그 초과면 CENTER.
+  반대쪽으로 바로 전환하지 않고 최소 한 update에서 CENTER를 거친다. 일정 시간 유지하는 timer는 추가하지 않았다.
+- 기존 -65 dBFS silence gate를 raw 입력에 먼저 적용한다. 둘 다 threshold 이하, 음수/NaN/Inf,
+  mono/불명확한 mapping이면 즉시 unavailable로 바꾸고 EMA/상태/delta를 초기화한다.
+- UI 활성 조건: Wearable active mode=stereo, 실제 buffer >=2채널, stereoUsable,
+  원본 `kAudioChannelLayoutTag_Stereo`와 ASBD 2채널이 확인되고 실제 buffer count와 일치,
+  silence gate 통과. Generic descriptions에 Left/Right가 있더라도 standard tag가 아니면 활성화하지 않는다.
+- Semantic mapping은 metadata의 stream Left/Right 역할이며 물리 마이크 상단/하단 또는 motor 방향을 뜻하지 않는다.
+  `physicalMappingVerified=false`를 유지한다. Orientation이 none이라는 이유만으로 semantic 방향을 차단하지 않는다.
+- 기본 진단 네 항목은 유지하고 방향 감지 값만 locale에 맞는 Left/Center/Right/Unavailable로 표시한다.
+  고급 진단에는 raw/smoothed delta, estimator state, direction, semantic mapping 확인, enter/release threshold를 표시한다.
+  Raw delta는 표시용 dBFS 차이로 clamp되고, estimator delta는 EMA RMS에서 계산되어 값이 다를 수 있다.
+- 출력은 Wearable 로컬 UI/state까지만이다. Laptop 전송/AI 결과 결합/BLE/motor/haptic을 추가하지 않는다.
+  AIInputProcessor/AIInputBuffer 및 기존 iPhone Mode는 변경하지 않았다.
+
+실기기: 고정된 portrait 상태와 일정한 소리로 LEFT/CENTER/RIGHT 위치를 반복 비교한다.
+Raw와 smoothed delta를 함께 기록하고 +0.7 진입/+0.3 해제, -0.7 진입/-0.3 해제를 관찰한다.
+0.3...0.7 또는 -0.7...-0.3 구간에서는 직전 상태에 따라 결과가 달라지는 것이 정상이다.
+반대쪽 이동은 CENTER 경유, 무음은 즉시 Unavailable, Start/Stop은 이전 상태가 남지 않아야 한다.
+Actual orientation=none 진단은 그대로 기록한다. 40,000/40,000 samples, live RMS와 iPhone Mode 복귀도 회귀 확인한다.
+Swift tests에는 요청한 8개 전환, ±0.3 유지 경계, 반대편 직접 점프 방지, 실제 기본 EMA의 지연/유지,
+silence/gate loss/invalid 입력/reset을 추가했다. 로컬 Swift compiler 및 Xcode test target이 없어 **추가만 했고 실행하지 않았다**.
 
 ### AVCapture multichannel capability probe — iPhone 16
 
@@ -234,7 +268,7 @@ AI buffer, Start/Stop 및 iPhone mode가 정상인지 확인한다. Probe true/t
 4. 고급 진단에서 active mode와 실제 PCM 채널 수/형식을 확인한다. Node는 사용하지 않으며,
    PCM이 mono이면 채널별 수치는 비어 있고 stereo/direction unavailable이어도 PCM ready는 가능하다.
 5. Stereo이면 현재 장착 orientation에서 좌우 박수·말소리·정면·조용한 상태의 채널 우세도를 비교한다.
-   어느 채널이 상승하는지 data source/orientation과 함께 확인하되, physical direction은 계속 unavailable이다.
+   어느 채널이 상승하는지 data source/orientation과 함께 확인하고, 아래 semantic direction/hysteresis도 검증한다.
 6. Stop → RMS/채널/PCM 상태 초기화 → Start 반복, 권한 대기 중 Stop/전환, 빠른 모드 왕복,
    background/foreground, route 변경/interruption, diagnostics 열기/닫기를 확인한다.
 7. iPhone mode로 돌아가 기존 Start/Stop, 수동/자동 inference, multi-iPhone RMS 방향,

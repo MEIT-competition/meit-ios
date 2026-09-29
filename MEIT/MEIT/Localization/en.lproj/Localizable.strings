@@ -99,11 +99,11 @@
 "wearable.unavailable" = "unavailable";
 "wearable.stereoUnavailable" = "Stereo input is unavailable. Mono audio can still prepare the AI input buffer.";
 "wearable.estimatedDirection" = "estimated direction · experimental";
-"wearable.direction.left" = "left";
-"wearable.direction.right" = "right";
-"wearable.direction.center" = "center";
-"wearable.direction.unavailable" = "unavailable";
-"wearable.experimentalNote" = "Channel dominance is experimental. Physical direction is unavailable until channel mapping is verified.";
+"wearable.direction.left" = "Left";
+"wearable.direction.right" = "Right";
+"wearable.direction.center" = "Center";
+"wearable.direction.unavailable" = "Unavailable";
+"wearable.experimentalNote" = "Experimental direction uses standard Stereo stream semantics and smoothed channel levels, not physical microphone locations. Center means similar levels, not a confirmed source in front.";
 "wearable.inputPort" = "input port";
 "wearable.dataSource" = "selected data source";
 "wearable.maximumChannels" = "maximum input channels";
@@ -200,7 +200,15 @@
 "wearable.layout.channel0" = "Channel 0 semantic label";
 "wearable.layout.channel1" = "Channel 1 semantic label";
 "wearable.layout.note" = "Stream semantic labels do not identify physical microphone locations or verify physical LEFT/RIGHT mapping. Missing or undecodable labels are unknown.";
-"wearable.channelDelta" = "Channel delta · CH1 − CH2";
+"wearable.channelDelta" = "Raw channel delta · CH1 − CH2";
 "wearable.channelDelta.value" = "%+.1f dB";
 
 "wearable.layout.name" = "Channel layout";
+
+/* Experimental Wearable semantic direction; thresholds only in advanced diagnostics. */
+"wearable.channelDelta.smoothed" = "Smoothed channel delta · CH1 − CH2";
+"wearable.estimatorState" = "Current estimator state";
+"wearable.semanticMapping" = "Standard Stereo semantic mapping";
+"wearable.threshold.enter" = "Enter threshold";
+"wearable.threshold.release" = "Release threshold";
+"wearable.threshold.value" = "±%.1f dB";

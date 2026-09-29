@@ -51,6 +51,13 @@ struct WearableMicState: Sendable {
     var activeMultichannelMode = "—"
     var capturePCM: CapturePCMDescription?
     var captureSession: WearableCaptureSessionState?
+    // Trusted only for the original standard Stereo tag with an ASBD channel count of two.
+    var stereoSemanticMappingAvailable: Bool {
+        capturePCM?.channelLayout.isStandardStereo == true && capturePCM?.channels == bufferChannels
+    }
+    var estimatorState: WearableDirection = .unavailable
+    var smoothedDeltaDB: Double?
+    let directionConfiguration = StereoDirectionConfiguration()
     // This is an orientation check, NOT a measured physical channel mapping.
     var portraitOrientationConfirmed: Bool {
         captureSession?.requestedOrientation == "portrait"
@@ -83,11 +90,16 @@ struct WearableMicState: Sendable {
     var channel1Peak: Double?
     var channel2Peak: Double?
     var channelDominance: StereoChannelDominance = .unavailable
-    // No measured channel-to-physical-direction mapping exists yet. Fail closed for UI/future laptop metadata.
-    var direction: WearableDirection { .unavailable }
+    // Experimental stream-semantic direction for local Wearable UI only.
+    // Silence/invalid input resets estimatorState to unavailable before it is published.
+    var direction: WearableDirection {
+        guard activeMultichannelMode == "stereo", bufferChannels >= 2, stereoUsable,
+              stereoSemanticMappingAvailable else { return .unavailable }
+        return estimatorState
+    }
     var audioReady = false
     var configurationNote: String?
-    // Physical mapping must be measured on-device. Never emit verified motor directions here.
+    // Separate physical calibration is still unverified; semantic UI output does not verify motor directions.
     let physicalMappingVerified = false
 
     @MainActor

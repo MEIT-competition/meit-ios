@@ -33,6 +33,7 @@ struct CapturePCMDescription: Sendable {
 struct CaptureChannelLayout: Sendable {
     var tag = "unknown"
     var name = "unknown"
+    private(set) var isStandardStereo = false
     var channel0Label = "unknown"
     var channel1Label = "unknown"
 
@@ -50,6 +51,7 @@ struct CaptureChannelLayout: Sendable {
         // https://developer.apple.com/documentation/coreaudiotypes/kaudiochannellayouttag_stereo
         if tag == kAudioChannelLayoutTag_Stereo {
             guard channels == 2 else { return result } // Reject contradictory ASBD metadata.
+            result.isStandardStereo = true
             result.name = "Stereo (Left, Right)"
             result.channel0Label = "Left"
             result.channel1Label = "Right"
