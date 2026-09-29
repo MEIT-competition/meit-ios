@@ -65,7 +65,8 @@
 "settings.serverHelp" = "동일한 Wi-Fi 네트워크에 있는 Windows bridge 주소를 입력하세요.";
 "settings.device" = "기기";
 "settings.about" = "앱 정보";
-"settings.aboutDescription" = "하드웨어 및 아이폰 대체 모드로 주변 소리를 확인합니다.";
+"settings.aboutDescription" = "위험음을 감지하고 방향 정보를 전달하는 보조 앱입니다. 실시간 오디오 입력, 자동 분석, 다중 기기 기반 방향 감지를 지원합니다.";
+"settings.copyright" = "copyright © meit ios. all rights reserved.";
 "common.done" = "완료";
 "diagnostics.title" = "진단 정보";
 "diagnostics.audio" = "오디오 및 AI 버퍼";

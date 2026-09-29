@@ -85,11 +85,38 @@ struct FallbackDetailsView: View {
                 NavigationLink(language.text("diagnostics.title")) { destination(.diagnostics) }
                 NavigationLink(language.text("developer.title")) { destination(.developerTools) }
             }
-            Section(language.text("settings.about")) {
-                Text("meit ios").font(.headline)
-                Text(language.text("settings.aboutDescription"))
+            Section {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("meit ios")
+                        .font(.headline.weight(.bold))
+                        .accessibilityAddTraits(.isHeader)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(language.text("settings.aboutDescription"))
+                            .font(.body)
+                            .lineSpacing(4)
+                        Text(language.text("hardware.pending"))
+                            .font(.subheadline)
+                    }
                     .foregroundStyle(.secondary)
-                Text(language.text("hardware.pending")).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(Color(uiColor: .tertiarySystemGroupedBackground),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(language.text("settings.about"))
+            } header: {
+                Text(language.text("settings.about"))
+            } footer: {
+                Text(language.text("settings.copyright"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+                    .textCase(nil)
             }
         }
     }

@@ -94,7 +94,7 @@ Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A sin
 - 상세 화면은 sheet 안의 NavigationStack으로 탐색한다. 상세 화면 이동은 capture/polling을
   정리하지 않고 snapshot 조회만 취소한다. 기존 모드 전환·background 정리는 유지한다.
 - system typography/colors, Dynamic Type, 텍스트 상태, VoiceOver label, 최소 44pt 주요 버튼을
-  사용한다. custom font, animation, glass/card 효과를 추가하지 않는다.
+  사용한다. custom font, animation, glass 효과는 없으며 About 설명에만 연한 배경 박스를 사용한다.
 - 새 IPA에서 Light/Dark, 큰 글자, VoiceOver, sheet 열기/뒤로/닫기 중 capture 유지,
   Auto·수동 결과 표시, 모든 테스트 액션과 모드 전환·foreground 복구를 확인한다.
   이전 Phase 테스트의 Start/Stop Capture는 현재 start/stop listening에 해당하고,
@@ -125,19 +125,40 @@ Actions에서 두 언어 리소스와 새 Swift 파일이 빌드·앱 번들에 
 실제 미터 변화·정지 초기화, Auto/수동 분석/진동/모드 전환/foreground 복구를 확인한다.
 한국어 segmented picker·긴 안내·버튼·큰 글자의 clipping, Light/Dark, VoiceOver도 확인한다.
 
-AppIcon design specification: 검정 바탕에 흰 소문자 `m` 하나. 폭·획·terminal 비율을 미세하게
-조정한 독자적인 단색 lettering, 넉넉한 여백, 작은 홈 화면 크기에서도 분명한 형태를 목표로 한다.
-파형·마이크·화살표·gradient·glow·그림자 및 타 브랜드 로고 복제는 사용하지 않는다.
-현재 AppIcon asset은 없으며 이번에는 PNG/SVG나 빈 asset을 추가하지 않았다.
-TODO: 최종 artwork와 작은 크기 검수 후 불투명 1024px 원본을 AppIcon asset에 연결하고
-Xcode asset compilation 및 실제 홈 화면을 검증한다. 빌드에 임시 asset 경로를 지정하지 않는다.
+### AppIcon & About
+
+실제 아이콘은 `MEIT/MEIT/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`에 포함한다.
+검정 배경·흰 소문자 `m`·넉넉한 여백·두꺼운 획의 독자적인 lettering이다. minitmute 참고 범위는
+흑백·소문자·절제된 인상이며 favicon/로고 파일을 복사하거나 생성 입력으로 사용하지 않았다.
+built-in image_gen으로 생성한 artwork를 1024×1024 불투명 RGB PNG로 규격화했다.
+40/60/120px 축소본의 식별성을 확인했다. 사전 모서리 마스크·gradient·glow·그림자는 없다.
+Xcode의 단일 iOS 1024px AppIcon 설정을 사용하고 asset catalog를 Resources에 한 번 등록한다.
+Debug/Release 모두 `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`이며 앱 표시 이름은 그대로다.
+
+About은 굵은 `meit ios`, 자연스럽게 줄바꿈되는 설명과 하드웨어 대기 안내를 담은 하나의
+secondary text / tertiary system grouped background 박스, 하단 copyright footer로 구성한다.
+설명은 한 문자열이며 강제 개행·줄 수 제한·고정 높이가 없다. Dynamic Type과 VoiceOver를 유지한다.
+`settings.aboutDescription`을 두 언어에서 수정하고 `settings.copyright`를 추가했다.
+기존 언어 선택·메인·manager·오디오·AI·진동·모드 전환·bridge·workflow 로직은 변경하지 않는다.
+
+Windows 기존 60개 테스트 및 소스/리소스 정적 검사를 수행했다. **Xcode asset compile과 새 IPA의
+실기기 검증은 아직 필요하다.** Actions에서 CompileAssetCatalog, AppIcon/Assets.car 및 두 언어
+리소스 포함, unsigned IPA 생성을 확인한다. iPhone에서는 홈 화면 아이콘, About의 bold/설명 박스/
+footer, 영어↔한국어, Light/Dark, 큰 글자와 VoiceOver를 확인한다.
+
+<details>
+<summary>AppIcon generation prompt (built-in image_gen)</summary>
+
+Use case: logo-brand. Asset type: final iOS AppIcon artwork, exact 1024x1024 square PNG, opaque RGB. Full bleed completely flat pure black background (#000000), square corners (iOS applies its own mask). One single white lowercase Latin letter "m" centered optically. Create original restrained editorial lettering: sturdy even strokes, two gently rounded shoulders, clean flat terminals, balanced slightly wide proportions, exceptionally crisp edges, no thin hairlines. Mark occupies approximately 58% of canvas width and 44% of height with ample black negative space. Legible at 40px. Only the exact letter "m", no other text. Calm, sharp, minimal black and white. No existing brand logo or favicon reference/copy. No microphone, soundwave, arrows, warning symbol, radar, gradient, texture, noise, shadows, glow, bevel, glass, 3D, borders, rounded icon frame, mockup or surrounding scene. Output the actual flat production icon alone, not a presentation.
+
+</details>
 
 ## 프로젝트
 
 - SwiftUI, iPhone 전용, deployment target **iOS 17.0** 이상: iPhone 15/16 대상.
 - Bundle identifier: `org.meit.ios`. 버전: `0.1.0` (build `1`).
 - 앱의 third-party dependency 및 패키지 설치 단계 없음.
-- Info.plist는 Xcode가 build settings와 로컬 네트워크용 `MEIT/MEIT/Info.plist`를 합쳐 생성한다. 아이콘은 이 단계에 포함하지 않는다.
+- Info.plist는 Xcode가 build settings와 로컬 네트워크용 `MEIT/MEIT/Info.plist`를 합쳐 생성한다. `Assets.xcassets`의 AppIcon을 포함한다.
 
 ```text
 meit-ios/
@@ -149,6 +170,11 @@ meit-ios/
 │       ├── MEITApp.swift
 │       ├── ContentView.swift
 │       ├── Info.plist
+│       ├── Assets.xcassets/
+│       │   ├── Contents.json
+│       │   └── AppIcon.appiconset/
+│       │       ├── Contents.json
+│       │       └── AppIcon-1024.png
 │       ├── Modes/
 │       │   ├── OperatingMode.swift
 │       │   ├── HardwareModeView.swift

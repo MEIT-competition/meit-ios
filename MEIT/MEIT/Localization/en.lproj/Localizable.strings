@@ -65,7 +65,8 @@
 "settings.serverHelp" = "Use the Windows bridge address on the same Wi-Fi network.";
 "settings.device" = "device";
 "settings.about" = "about";
-"settings.aboutDescription" = "Environmental sound awareness with hardware and iphone fallback modes.";
+"settings.aboutDescription" = "A companion app for detecting danger sounds and providing directional awareness. It supports live audio monitoring, automatic analysis, and multi-device direction sensing.";
+"settings.copyright" = "copyright © meit ios. all rights reserved.";
 "common.done" = "done";
 "diagnostics.title" = "diagnostics";
 "diagnostics.audio" = "microphone & AI buffer";
