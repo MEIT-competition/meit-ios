@@ -2,10 +2,10 @@ enum OperatingMode: String, CaseIterable, Codable {
     case hardware
     case fallback
 
-    var displayName: String {
+    var localizationKey: String {
         switch self {
-        case .hardware: return "hardware"
-        case .fallback: return "iphone fallback"
+        case .hardware: return "mode.hardware"
+        case .fallback: return "mode.fallback"
         }
     }
 }

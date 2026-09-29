@@ -8,15 +8,16 @@ struct ContentView: View {
     @StateObject private var devices = DeviceCoordinator()
     @StateObject private var haptics = HapticManager()
     @AppStorage("meit.operatingMode") private var operatingMode: OperatingMode = .hardware
+    @AppStorage("meit.language") private var language: AppLanguage = .english
     @State private var startCaptureTask: Task<Void, Never>?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("operating mode", selection: modeSelection) {
+                Picker(language.text("mode.selector"), selection: modeSelection) {
                     ForEach(OperatingMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
+                        Text(language.text(mode.localizationKey)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -35,6 +36,8 @@ struct ContentView: View {
             .navigationTitle("meit ios")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .environment(\.appLanguage, language)
+        .environment(\.locale, language.locale)
     }
 
     private var modeSelection: Binding<OperatingMode> {

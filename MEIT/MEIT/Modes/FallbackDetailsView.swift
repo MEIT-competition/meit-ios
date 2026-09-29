@@ -5,6 +5,13 @@ enum FallbackPage: String, Identifiable {
     case diagnostics
     case developerTools = "developer tools"
     var id: String { rawValue }
+    var localizationKey: String {
+        switch self {
+        case .settings: return "settings.title"
+        case .diagnostics: return "diagnostics.title"
+        case .developerTools: return "developer.title"
+        }
+    }
 }
 
 // Detail screens observe the root's managers. Navigation never starts/stops capture or polling.
@@ -16,6 +23,8 @@ struct FallbackDetailsView: View {
     @ObservedObject var haptics: HapticManager
     @Binding var operatingMode: OperatingMode
     let page: FallbackPage
+    @Environment(\.appLanguage) private var language
+    @AppStorage("meit.language") private var selectedLanguage: AppLanguage = .english
     @State private var snapshotTask: Task<Void, Never>?
     @State private var snapshotInfo: String?
     @State private var checkingSnapshot = false
@@ -29,7 +38,7 @@ struct FallbackDetailsView: View {
             }
         }
         .listStyle(.inset)
-        .navigationTitle(page.rawValue)
+        .navigationTitle(language.text(page.localizationKey))
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { cancelSnapshotCheck() }
         .onChange(of: audio.isCapturing) { _, _ in cancelSnapshotCheck() }
@@ -43,43 +52,51 @@ struct FallbackDetailsView: View {
     private var settings: some View {
         Group {
             Section {
-                TextField("Windows private IPv4", text: $network.serverAddress)
-                    .keyboardType(.decimalPad)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(network.isBusy)
-                    .accessibilityLabel("server address")
-                LabeledContent("port", value: "8765")
-                Button("test connection") { network.testConnection() }
-                    .disabled(network.isBusy)
-                manualRequestState
-            } header: { Text("server address") }
-            footer: { Text("Use the Windows bridge address on the same Wi-Fi network.") }
-
-            Section("device") {
-                Picker("device position", selection: $devices.role) {
-                    ForEach(DeviceRole.allCases, id: \.self) { role in
-                        Text(role.rawValue).tag(role)
+                Picker(language.text("settings.language"), selection: $selectedLanguage) {
+                    ForEach(AppLanguage.allCases, id: \.self) { option in
+                        Text(option.nativeName).tag(option)
                     }
                 }
                 .pickerStyle(.menu)
             }
             Section {
-                NavigationLink("diagnostics") { destination(.diagnostics) }
-                NavigationLink("developer tools") { destination(.developerTools) }
+                TextField(language.text("settings.addressPlaceholder"), text: $network.serverAddress)
+                    .keyboardType(.decimalPad)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .disabled(network.isBusy)
+                    .accessibilityLabel(language.text("settings.serverAddress"))
+                LabeledContent(language.text("settings.port"), value: "8765")
+                Button(language.text("developer.testConnection")) { network.testConnection() }
+                    .disabled(network.isBusy)
+                manualRequestState
+            } header: { Text(language.text("settings.serverAddress")) }
+            footer: { Text(language.text("settings.serverHelp")) }
+
+            Section(language.text("settings.device")) {
+                Picker(language.text("main.devicePosition"), selection: $devices.role) {
+                    ForEach(DeviceRole.allCases, id: \.self) { role in
+                        Text(language.position(role.rawValue)).tag(role)
+                    }
+                }
+                .pickerStyle(.menu)
             }
-            Section("about") {
+            Section {
+                NavigationLink(language.text("diagnostics.title")) { destination(.diagnostics) }
+                NavigationLink(language.text("developer.title")) { destination(.developerTools) }
+            }
+            Section(language.text("settings.about")) {
                 Text("meit ios").font(.headline)
-                Text("Environmental sound awareness with hardware and iphone fallback modes.")
+                Text(language.text("settings.aboutDescription"))
                     .foregroundStyle(.secondary)
-                Text("Hardware integration is not available yet.").foregroundStyle(.secondary)
+                Text(language.text("hardware.pending")).foregroundStyle(.secondary)
             }
         }
     }
 
     private var diagnostics: some View {
         Group {
-            Section("microphone & AI buffer") {
+            Section(language.text("diagnostics.audio")) {
                 LabeledContent("Permission", value: audio.microphonePermission.rawValue)
                 LabeledContent("Capture", value: audio.isCapturing ? "Running" : (audio.isStarting ? "Starting" : "Stopped"))
                 diagnosticValue("Current local RMS", audio.rmsDBFS, unit: "dBFS")
@@ -92,7 +109,7 @@ struct FallbackDetailsView: View {
                 LabeledContent("Converted total", value: "\(audio.aiBufferStatus.totalConvertedSamples) samples")
                 if let error = audio.errorMessage { Text(error).foregroundStyle(.red) }
             }
-            Section("network") {
+            Section(language.text("diagnostics.network")) {
                 LabeledContent("Server (poll)", value: devices.pollingStatus == "Active" ? "Connected" : devices.pollingStatus)
                 LabeledContent("Registration", value: devices.registration)
                 LabeledContent("RMS reporting", value: devices.rmsStatus)
@@ -108,14 +125,14 @@ struct FallbackDetailsView: View {
                 if let error = network.errorMessage { Text(error).foregroundStyle(.red) }
                 LabeledContent("Device ID", value: "\(devices.deviceID.prefix(8))…")
             }
-            Section("direction") {
-                Text(devices.direction?.direction.lowercased() ?? "unavailable")
+            Section(language.text("main.direction")) {
+                Text(language.position(devices.direction?.direction))
                 if let direction = devices.direction {
                     diagnosticValue("Margin", direction.marginDB, unit: "dB")
                     Text(direction.detail)
                 }
             }
-            Section("automatic detection") {
+            Section(language.text("diagnostics.auto")) {
                 LabeledContent("Auto", value: devices.autoStatus.map { $0.enabled ? "On" : "Off" } ?? "Unavailable")
                 LabeledContent("State", value: devices.autoStatus?.state.replacingOccurrences(of: "_", with: " ") ?? "Unavailable")
                 if let status = devices.autoStatus {
@@ -127,26 +144,26 @@ struct FallbackDetailsView: View {
                     diagnosticValue("Quiet observed", status.quiet_elapsed_ms)
                     diagnosticValue("Quiet required", status.rearm_quiet_ms)
                     if let active = status.active_event {
-                        LabeledContent("Current source", value: active.source_role)
+                        LabeledContent("Current source", value: language.position(active.source_role))
                     }
                 }
                 if let message = devices.autoMessage { Text(message) }
             }
             if let event = devices.autoStatus?.last_event {
-                Section("last automatic event") {
-                    LabeledContent("Source", value: event.source_role)
+                Section(language.text("diagnostics.lastEvent")) {
+                    LabeledContent("Source", value: language.position(event.source_role))
                     LabeledContent("Outcome", value: event.outcome.replacingOccurrences(of: "_", with: " "))
-                    LabeledContent("Direction", value: event.direction)
+                    LabeledContent("Direction", value: language.position(event.direction))
                     if let result = event.result {
-                        LabeledContent("Label", value: result.label)
+                        LabeledContent("Label", value: language.soundLabel(result.label))
                         diagnosticValue("Confidence", result.confidence * 100, unit: "%")
                     }
                 }
             }
             if let event = devices.autoStatus?.active_event ?? devices.autoStatus?.last_event {
-                Section("event timing") {
+                Section(language.text("diagnostics.timing")) {
                     LabeledContent("Event", value: String(event.event_id.prefix(8)))
-                    LabeledContent("Source", value: event.source_role)
+                    LabeledContent("Source", value: language.position(event.source_role))
                     diagnosticValue("Trigger RMS", event.trigger_rms_dbfs, unit: "dBFS")
                     LabeledContent("Reason", value: event.trigger_reason ?? "Unavailable")
                     Text("Timestamps: ms since this bridge started").foregroundStyle(.secondary)
@@ -163,38 +180,38 @@ struct FallbackDetailsView: View {
                 }
             }
             Section {
-                NavigationLink("developer tools") { destination(.developerTools) }
+                NavigationLink(language.text("developer.title")) { destination(.developerTools) }
             }
         }
     }
 
     private var developerTools: some View {
         Group {
-            Section("snapshot & server") {
-                Button("test connection") { network.testConnection() }
+            Section(language.text("developer.snapshotServer")) {
+                Button(language.text("developer.testConnection")) { network.testConnection() }
                     .disabled(network.isBusy)
-                Button("send snapshot") { network.sendSnapshot(from: audio) }
+                Button(language.text("developer.sendSnapshot")) { network.sendSnapshot(from: audio) }
                     .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
-                Button("check snapshot") { checkSnapshot() }
+                Button(language.text("developer.checkSnapshot")) { checkSnapshot() }
                     .disabled(!audio.aiBufferStatus.isReady || checkingSnapshot || network.isBusy)
-                if checkingSnapshot { ProgressView("Checking snapshot…") }
+                if checkingSnapshot { ProgressView(language.text("developer.checking")) }
                 if let snapshotInfo { Text(snapshotInfo).monospacedDigit() }
                 manualRequestState
             }
             if let result = network.result {
-                Section("manual AI result") {
-                    LabeledContent("Label", value: result.label)
+                Section(language.text("developer.manualResult")) {
+                    LabeledContent("Label", value: language.soundLabel(result.label))
                     diagnosticValue("Confidence", result.confidence * 100, unit: "%")
                     diagnosticValue("Inference", result.inferenceMilliseconds)
-                    LabeledContent("Direction", value: result.direction ?? "UNKNOWN")
+                    LabeledContent("Direction", value: language.position(result.direction))
                     diagnosticValue("Direction margin", result.directionMarginDB, unit: "dB")
                 }
             }
-            Section("system vibration") {
-                Button("test haptic") { haptics.play() }
+            Section(language.text("developer.vibration")) {
+                Button(language.text("developer.testHaptic")) { haptics.play() }
                     .disabled(!haptics.isSupported)
                 LabeledContent("Haptic", value: haptics.isSupported ? haptics.status : "Unsupported")
-                Button("test direction + haptic") { devices.testDirectionHaptic() }
+                Button(language.text("developer.testDirectionHaptic")) { devices.testDirectionHaptic() }
                     .disabled(!devices.isRegistered || devices.testingDirection || network.isBusy)
                 if let result = devices.testResult { Text(result) }
                 if let error = devices.networkError { Text(error).foregroundStyle(.red) }
@@ -205,10 +222,10 @@ struct FallbackDetailsView: View {
 
     private var manualRequestState: some View {
         Group {
-            LabeledContent("Last manual request", value: network.connectionStatus)
+            LabeledContent(language.text("developer.lastRequest"), value: language.connectionStatus(network.connectionStatus))
             if network.isBusy {
-                ProgressView(network.isSending ? "Sending…" : "Testing connection…")
-                Button("cancel request") { network.cancel() }
+                ProgressView(network.isSending ? language.text("developer.sending") : language.text("developer.connecting"))
+                Button(language.text("developer.cancel")) { network.cancel() }
             }
             if let error = network.errorMessage { Text(error).foregroundStyle(.red) }
         }

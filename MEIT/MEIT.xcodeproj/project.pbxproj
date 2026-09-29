@@ -18,6 +18,9 @@
 		A10000000000000000000010 /* HardwareModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* HardwareModeView.swift */; };
 		A10000000000000000000011 /* FallbackModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* FallbackModeView.swift */; };
 		A10000000000000000000012 /* FallbackDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* FallbackDetailsView.swift */; };
+		A10000000000000000000013 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* AppLanguage.swift */; };
+		A10000000000000000000014 /* LiveAudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* LiveAudioView.swift */; };
+		A10000000000000000000015 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000009 /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +38,10 @@
 		A20000000000000000000012 /* HardwareModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareModeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* FallbackModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackModeView.swift; sourceTree = "<group>"; };
 		A20000000000000000000014 /* FallbackDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallbackDetailsView.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		A20000000000000000000016 /* LiveAudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAudioView.swift; sourceTree = "<group>"; };
+		A20000000000000000000017 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		A20000000000000000000018 /* ko */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ko; path = ko.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +68,7 @@
 				A20000000000000000000001 /* MEITApp.swift */,
 				A20000000000000000000002 /* ContentView.swift */,
 				A40000000000000000000007 /* Modes */,
+				A40000000000000000000008 /* Localization */,
 				A40000000000000000000004 /* Audio */,
 				A40000000000000000000005 /* Network */,
 				A40000000000000000000006 /* Haptics */,
@@ -104,11 +112,33 @@
 				A20000000000000000000012 /* HardwareModeView.swift */,
 				A20000000000000000000013 /* FallbackModeView.swift */,
 				A20000000000000000000014 /* FallbackDetailsView.swift */,
+				A20000000000000000000016 /* LiveAudioView.swift */,
 			);
 			path = Modes;
 			sourceTree = "<group>";
 		};
+		A40000000000000000000008 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000015 /* AppLanguage.swift */,
+				A40000000000000000000009 /* Localizable.strings */,
+			);
+			path = Localization;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
+
+/* Begin PBXVariantGroup section */
+		A40000000000000000000009 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A20000000000000000000017 /* en */,
+				A20000000000000000000018 /* ko */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin PBXNativeTarget section */
 		A50000000000000000000001 /* MEIT */ = {
@@ -142,7 +172,7 @@
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (en, Base,);
+			knownRegions = (en, ko, Base,);
 			mainGroup = A40000000000000000000001;
 			productRefGroup = A40000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -155,7 +185,7 @@
 		A70000000000000000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (A10000000000000000000015 /* Localizable.strings in Resources */,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -170,6 +200,8 @@
 				A10000000000000000000010 /* HardwareModeView.swift in Sources */,
 				A10000000000000000000011 /* FallbackModeView.swift in Sources */,
 				A10000000000000000000012 /* FallbackDetailsView.swift in Sources */,
+				A10000000000000000000013 /* AppLanguage.swift in Sources */,
+				A10000000000000000000014 /* LiveAudioView.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* AudioCaptureManager.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,

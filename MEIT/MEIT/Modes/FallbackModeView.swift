@@ -10,6 +10,7 @@ struct FallbackModeView: View {
     let onStartCapture: () -> Void
     let onStopCapture: () -> Void
     let onDeactivate: () -> Void
+    @Environment(\.appLanguage) private var language
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedPage: FallbackPage?
     @State private var lastDetection: DetectionPresentation?
@@ -22,25 +23,25 @@ struct FallbackModeView: View {
     }
 
     private var listeningTitle: String {
-        if audio.microphonePermission == .denied { return "microphone access needed" }
-        if audio.isStarting { return "starting…" }
-        return audio.isCapturing ? "listening" : "not listening"
+        if audio.microphonePermission == .denied { return language.text("main.permission.title") }
+        if audio.isStarting { return language.text("main.starting.title") }
+        return audio.isCapturing ? language.text("main.listening.title") : language.text("main.idle.title")
     }
 
     private var listeningDescription: String {
         if audio.microphonePermission == .denied {
-            return "Allow microphone access in iPhone Settings to start listening."
+            return language.text("main.permission.subtitle")
         }
-        if audio.isStarting { return "Waiting for microphone access." }
-        guard audio.isCapturing else { return "Start listening when you’re ready." }
+        if audio.isStarting { return language.text("main.starting.subtitle") }
+        guard audio.isCapturing else { return language.text("main.idle.subtitle") }
         guard devices.isRegistered, devices.pollingStatus == "Active" else {
-            return "Your microphone is on. Connect to the server in settings to analyze sounds."
+            return language.text("main.offline.subtitle")
         }
         guard devices.autoStatus?.enabled == true else {
-            return "Your microphone is on. Turn on auto detection to analyze sounds."
+            return language.text("main.manual.subtitle")
         }
-        if !audio.aiBufferStatus.isReady { return "Preparing to analyze your surroundings." }
-        return "Listening for environmental sounds."
+        if !audio.aiBufferStatus.isReady { return language.text("main.buffering.subtitle") }
+        return language.text("main.listening.subtitle")
     }
 
     private var autoEnabled: Binding<Bool> {
@@ -65,18 +66,20 @@ struct FallbackModeView: View {
                 }
                 .accessibilityElement(children: .combine)
 
+                LiveAudioView(rmsDBFS: audio.rmsDBFS, isCapturing: audio.isCapturing)
+
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("auto detection", isOn: autoEnabled)
+                    Toggle(language.text("main.autoDetection"), isOn: autoEnabled)
                         .disabled(!devices.isRegistered || devices.changingAuto
                                   || (devices.autoStatus?.enabled != true && !audio.isCapturing))
-                        .accessibilityValue(devices.autoStatus.map { $0.enabled ? "on" : "off" } ?? "unavailable")
-                    Text(devices.changingAuto ? "Updating…" :
-                         (devices.autoStatus == nil ? "Connect to the server to check auto detection." :
-                          "Automatically analyzes detected sounds. Shared by all connected phones."))
+                        .accessibilityValue(devices.autoStatus.map { $0.enabled ? language.text("status.on") : language.text("status.off") } ?? language.text("status.unavailable"))
+                    Text(devices.changingAuto ? language.text("main.auto.updating") :
+                         (devices.autoStatus == nil ? language.text("main.auto.connect") :
+                          language.text("main.auto.description")))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let message = devices.autoMessage {
-                        Text(message).font(.subheadline).foregroundStyle(.secondary)
+                    if devices.autoMessage != nil {
+                        Text(language.text("main.auto.notice")).font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
 
@@ -84,27 +87,27 @@ struct FallbackModeView: View {
                 detectionSummary
 
                 VStack(spacing: 16) {
-                    Picker("device position", selection: $devices.role) {
+                    Picker(language.text("main.devicePosition"), selection: $devices.role) {
                         ForEach(DeviceRole.allCases, id: \.self) { role in
-                            Text(role.rawValue).tag(role)
+                            Text(language.position(role.rawValue)).tag(role)
                         }
                     }
                     .pickerStyle(.menu)
-                    LabeledContent("server", value: devices.isRegistered && devices.pollingStatus == "Active"
-                                   ? "connected" : "not connected")
+                    LabeledContent(language.text("main.server"), value: devices.isRegistered && devices.pollingStatus == "Active"
+                                   ? language.text("status.connected") : language.text("status.notConnected"))
                 }
 
-                if let error = audio.errorMessage {
-                    Text(error).foregroundStyle(.red)
+                if audio.errorMessage != nil {
+                    Text(language.text("main.microphoneError")).foregroundStyle(.red)
                 }
                 if devices.networkError != nil || network.errorMessage != nil {
-                    Text("Server communication needs attention. Open settings or diagnostics for details.")
+                    Text(language.text("main.networkError"))
                         .foregroundStyle(.secondary)
                 }
                 Divider()
                 Button { presentedPage = .diagnostics } label: {
                     HStack {
-                        Text("diagnostics")
+                        Text(language.text("diagnostics.title"))
                         Spacer()
                         Image(systemName: "chevron.right").accessibilityHidden(true)
                     }
@@ -126,7 +129,7 @@ struct FallbackModeView: View {
                 Button { presentedPage = .settings } label: {
                     Image(systemName: "gearshape").frame(minWidth: 44, minHeight: 44)
                 }
-                .accessibilityLabel("settings")
+                .accessibilityLabel(language.text("settings.title"))
             }
         }
         // A sheet keeps this presenting screen in place while inspecting details.
@@ -137,10 +140,13 @@ struct FallbackModeView: View {
                                     operatingMode: $operatingMode, page: page)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("done") { presentedPage = nil }
+                            Button(language.text("common.done")) { presentedPage = nil }
                         }
                     }
             }
+            // Keep the presented hierarchy on the current selection while the sheet is open.
+            .environment(\.appLanguage, language)
+            .environment(\.locale, language.locale)
             .presentationDetents([.large])
         }
         // Retain only the latest result observed by this screen, not an inference history.
@@ -207,52 +213,42 @@ struct FallbackModeView: View {
             if audio.isCapturing || audio.isStarting { onStopCapture() }
             else { onStartCapture() }
         } label: {
-            Text(audio.isCapturing || audio.isStarting ? "stop listening" : "start listening")
+            Text(audio.isCapturing || audio.isStarting ? language.text("main.stop") : language.text("main.start"))
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .frame(maxWidth: .infinity)
         .accessibilityHint(audio.isCapturing || audio.isStarting
-                           ? "Stops microphone capture and pending audio uploads."
-                           : "Starts microphone capture. Auto detection is controlled separately.")
+                           ? language.text("main.stop.hint")
+                           : language.text("main.start.hint"))
     }
 
     private var detectionSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("last detection").font(.headline)
+            Text(language.text("main.lastDetection")).font(.headline)
             if let detection = lastDetection {
-                Text(displayLabel(detection.result.label)).font(.title2.weight(.medium))
-                Text(String(format: "%.1f%% confidence", detection.result.confidence * 100))
+                Text(language.soundLabel(detection.result.label)).font(.title2.weight(.medium))
+                Text(language.text("main.confidence", detection.result.confidence * 100))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                Text("Last \(detection.source) result").font(.subheadline).foregroundStyle(.secondary)
+                Text(language.text(detection.source == "manual" ? "main.result.manual" : "main.result.automatic")).font(.subheadline).foregroundStyle(.secondary)
             } else {
-                Text("No detection yet").foregroundStyle(.secondary)
-                Text("Results will appear after a sound is analyzed.")
+                Text(language.text("main.noDetection")).foregroundStyle(.secondary)
+                Text(language.text("main.result.placeholder"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             // Before the first result show live direction; afterwards show that result's direction.
             let direction = lastDetection == nil ? devices.direction?.direction : lastDetection?.direction
             if let direction, DeviceRole(rawValue: direction.lowercased()) != nil {
-                LabeledContent("direction", value: direction.lowercased())
+                LabeledContent(language.text("main.direction"), value: language.position(direction))
             } else {
-                Text("direction unavailable")
-                Text("Connect all four positions and check their microphone levels for direction detection.")
+                Text(language.text("main.directionUnavailable"))
+                Text(language.text("main.directionHelp"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-        }
-    }
-
-    private func displayLabel(_ raw: String) -> String {
-        switch raw {
-        case "horn": return "Horn"
-        case "siren": return "Siren"
-        case "crash": return "Crash"
-        case "normal": return "Normal Sound"
-        default: return raw
         }
     }
 }

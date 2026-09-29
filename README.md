@@ -84,7 +84,7 @@ Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A sin
 ## UI & branding
 
 - 앱 표시 이름과 상단 title은 `meit ios`, 모드는 `hardware / iphone fallback`이다.
-- 메인은 listening → auto detection → last detection / direction → device position / server →
+- 메인은 listening → live audio → auto detection → last detection / direction → device position / server →
   하나의 start/stop listening action 순서다. 시작/정지는 하단에 고정해 스크롤 중에도 접근할 수 있다.
   마이크 활성 상태와 자동 분석 가능 상태를 구분한다.
   마지막 결과는 이 화면에서 가장 최근 관측한 수동/자동 결과 하나이며 과거 결과임을 표시한다.
@@ -99,6 +99,31 @@ Phase 4 실제 네 iPhone 방향 검증은 여전히 pending이며, Phase 6A sin
   Auto·수동 결과 표시, 모든 테스트 액션과 모드 전환·foreground 복구를 확인한다.
   이전 Phase 테스트의 Start/Stop Capture는 현재 start/stop listening에 해당하고,
   기술 수치와 테스트 버튼은 diagnostics/developer tools에서 찾는다.
+
+### English / 한국어 & live audio
+
+settings → language에서 English / 한국어를 선택한다. 기본값은 English이며
+`@AppStorage("meit.language")`로 저장한다. `Localization/en.lproj/Localizable.strings`와
+`ko.lproj/Localizable.strings`의 의미 기반 key를 선택 언어의 Bundle로 조회하고,
+환경값으로 열린 메인·sheet·상세 화면에 전달한다. 언어 변경 시 `.id`로 화면을 재생성하거나
+manager를 교체하지 않는다. 브랜드 `meit ios`와 아이콘 규격은 유지한다.
+메인·AI label·방향·기기 위치·설정·개발자 액션·Hardware 안내를 번역한다.
+진단 section 제목도 번역하되 기술 key/수치 및 manager·서버의 원본 오류는 그대로 표시한다.
+앱 안 언어 선택은 iOS 자체 권한 팝업이나 시스템 언어 설정을 변경하지 않는다.
+
+listening 상태 바로 아래 live audio는 기존 `audio.rmsDBFS`와 `isCapturing`만 받는다.
+수평 ProgressView는 `clamp((dBFS + 60) / 60, 0...1)`로 표시한다:
+-60 dBFS 이하 0%, -30 dBFS 50%, -10 dBFS 약 83%, 0 dBFS 100%.
+이것은 시각화 스케일이며 AI trigger/rearm과 관계없다. 기존 약 10 Hz RMS 발행을 그대로
+사용하며 별도 timer, animation, waveform history, PCM 복사 또는 DSP가 없다.
+정지 시 0% / — dBFS / microphone inactive를 표시한다. 비유한 입력은 표시에서만 방어한다.
+VoiceOver는 현 언어로 레벨과 수음 상태를 함께 읽고 매 갱신마다 강제로 알리지 않는다.
+
+이번 변경은 Windows 정적 검토와 기존 60개 bridge 테스트로 확인하며 실제 iOS 검증은 별도다.
+Actions에서 두 언어 리소스와 새 Swift 파일이 빌드·앱 번들에 포함되는지 확인한다.
+실기기에서는 양방향 언어 전환(열린 sheet 포함)·재실행 저장·수음 유지, 말/박수/조용한 환경의
+실제 미터 변화·정지 초기화, Auto/수동 분석/진동/모드 전환/foreground 복구를 확인한다.
+한국어 segmented picker·긴 안내·버튼·큰 글자의 clipping, Light/Dark, VoiceOver도 확인한다.
 
 AppIcon design specification: 검정 바탕에 흰 소문자 `m` 하나. 폭·획·terminal 비율을 미세하게
 조정한 독자적인 단색 lettering, 넉넉한 여백, 작은 홈 화면 크기에서도 분명한 형태를 목표로 한다.
@@ -128,7 +153,12 @@ meit-ios/
 │       │   ├── OperatingMode.swift
 │       │   ├── HardwareModeView.swift
 │       │   ├── FallbackModeView.swift
-│       │   └── FallbackDetailsView.swift
+│       │   ├── FallbackDetailsView.swift
+│       │   └── LiveAudioView.swift
+│       ├── Localization/
+│       │   ├── AppLanguage.swift
+│       │   ├── en.lproj/Localizable.strings
+│       │   └── ko.lproj/Localizable.strings
 │       ├── Network/
 │       │   ├── NetworkManager.swift
 │       │   └── DeviceCoordinator.swift
