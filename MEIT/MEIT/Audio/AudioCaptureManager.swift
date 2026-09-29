@@ -95,6 +95,8 @@ final class AudioCaptureManager: ObservableObject {
         }
 
         do {
+            // Preserve the iPhone-mode baseline. Only the wearable preferences transaction
+            // temporarily changes mode to default, before creating any engine or tap.
             try session.setCategory(.record, mode: .measurement, options: [])
             try session.setActive(true)
             sessionActive = true
@@ -106,12 +108,14 @@ final class AudioCaptureManager: ObservableObject {
                 wearableEstimator.reset()
                 wearablePreferences = WearableAudioPreferences(session: session)
                 guard let preferences = wearablePreferences else { throw CaptureError.unavailableInput }
-                do { try preferences.requestStereo(session) }
+                do { wearableMic.stereoRequest = try preferences.requestStereo(session) }
                 catch {
                     // A stereo request failure is not a mono capture failure. Undo partial requests.
-                    wearableMic.configurationNote = error.localizedDescription
+                    wearableMic.stereoRequest = .failed
+                    wearableMic.configurationNote = "\(preferences.configurationStep): \(error.localizedDescription)"
                     try restoreWearablePreferences()
                 }
+                wearableMic.availableDataSources = preferences.availableDataSources
                 // Wearable mode uses the built-in iPhone microphone, not an external headset.
                 guard session.currentRoute.inputs.first?.portType == .builtInMic else {
                     throw CaptureError.unavailableInput
@@ -129,9 +133,11 @@ final class AudioCaptureManager: ObservableObject {
             }
 
             if owner == .wearableMode {
-                let note = wearableMic.configurationNote
+                let configuration = wearableMic
                 wearableMic = .inspect(session, nodeChannels: Int(format.channelCount))
-                wearableMic.configurationNote = note
+                wearableMic.availableDataSources = configuration.availableDataSources
+                wearableMic.stereoRequest = configuration.stereoRequest
+                wearableMic.configurationNote = configuration.configurationNote
                 wearableRouteSignature = currentWearableRouteSignature()
             }
 
@@ -144,7 +150,7 @@ final class AudioCaptureManager: ObservableObject {
             aiProcessor = processor
             // Build the audio callback outside MainActor so it does not inherit UI isolation.
             let measureStereo = owner == .wearableMode && wearableMic.configuredStereo
-                && wearableMic.sessionChannels == 2 && wearableMic.nodeChannels == 2
+                && wearableMic.sessionChannels >= 2 && wearableMic.nodeChannels >= 2
             let tap = NativeRMSMeter.makeTap(aiProcessor: processor,
                 monitorStereo: owner == .wearableMode, measureStereo: measureStereo) { [weak self] dbFS, stereo in
                 // Only scalar readings cross threads, at approximately 10 updates per second.
@@ -265,8 +271,8 @@ final class AudioCaptureManager: ObservableObject {
             return
         }
         wearableMic.bufferChannels = reading.channels
-        let usable = wearableMic.configuredStereo && wearableMic.sessionChannels == 2
-            && wearableMic.nodeChannels == 2 && reading.channels == 2
+        let usable = wearableMic.configuredStereo && wearableMic.sessionChannels >= 2
+            && wearableMic.nodeChannels >= 2 && reading.channels >= 2
         wearableMic.stereoUsable = usable
         wearableMic.channel1RMS = usable ? reading.channel1RMS : nil
         wearableMic.channel2RMS = usable ? reading.channel2RMS : nil
@@ -330,12 +336,12 @@ private final class NativeRMSMeter {
             for frame in 0..<frames {
                 let sample = Double(samples[frame * stride])
                 if sample.isFinite { sumOfSquares += sample * sample }
-                if measureStereo && channels == 2 {
+                if measureStereo && channels >= 2 {
                     if !sample.isFinite { stereoInvalid = true }
                     else if channel == 0 {
                         channel1Power += sample * sample
                         channel1Peak = max(channel1Peak, abs(sample))
-                    } else {
+                    } else if channel == 1 {
                         channel2Power += sample * sample
                         channel2Peak = max(channel2Peak, abs(sample))
                     }
@@ -343,7 +349,7 @@ private final class NativeRMSMeter {
             }
         }
         if monitorStereo {
-            if measureStereo && channels == 2 { stereoFrames += frames }
+            if measureStereo && channels >= 2 { stereoFrames += frames }
             else { stereoInvalid = true }
         }
         sampleCount += frames * channels
@@ -352,7 +358,7 @@ private final class NativeRMSMeter {
 
         var stereo: NativeStereoReading?
         if monitorStereo {
-            let validStereo = measureStereo && channels == 2 && stereoFrames > 0 && !stereoInvalid
+            let validStereo = measureStereo && channels >= 2 && stereoFrames > 0 && !stereoInvalid
             stereo = NativeStereoReading(channels: channels,
                 channel1RMS: validStereo ? sqrt(channel1Power / Double(stereoFrames)) : nil,
                 channel2RMS: validStereo ? sqrt(channel2Power / Double(stereoFrames)) : nil,

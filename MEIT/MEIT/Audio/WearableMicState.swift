@@ -25,8 +25,38 @@ enum StereoChannelDominance: String, Sendable {
     var localizationKey: String { "wearable.dominance.\(rawValue)" }
 }
 
+// Value-only snapshots of every built-in source under the wearable session mode.
+struct BuiltInMicDataSource: Identifiable, Sendable {
+    let id: Int
+    let name: String
+    let location: String
+    let orientation: String
+    let supportedPatterns: String
+    let supportsStereo: Bool
+
+    @MainActor
+    init(_ source: AVAudioSessionDataSourceDescription) {
+        id = source.dataSourceID.intValue
+        name = source.dataSourceName
+        location = source.location?.rawValue ?? "—"
+        orientation = source.orientation?.rawValue ?? "—"
+        supportedPatterns = source.supportedPolarPatterns?.map(\.rawValue).joined(separator: ", ") ?? "—"
+        supportsStereo = source.supportedPolarPatterns?.contains(.stereo) == true
+    }
+}
+
+enum WearableStereoRequest: String, Sendable {
+    case notRequested, noStereoSource, requested, channelsUnavailable, failed
+    var localizationKey: String { "wearable.stereoRequest.\(rawValue)" }
+}
+
 // Immutable snapshots are published by the existing audio owner; metadata for a future laptop transport; no transport or motor command.
 struct WearableMicState: Sendable {
+    var availableDataSources: [BuiltInMicDataSource] = []
+    var stereoRequest: WearableStereoRequest = .notRequested
+    var sessionCategory = "—"
+    var sessionMode = "—"
+    var preferredChannels = 0
     var inputPort = "—"
     var dataSource = "—"
     var maximumChannels = 0
@@ -56,6 +86,9 @@ struct WearableMicState: Sendable {
         let port = session.currentRoute.inputs.first
         let source = port?.selectedDataSource
         var state = Self()
+        state.sessionCategory = session.category.rawValue
+        state.sessionMode = session.mode.rawValue
+        state.preferredChannels = session.preferredInputNumberOfChannels
         // Port type rather than a potentially identifying headset/device name.
         state.inputPort = port?.portType.rawValue ?? "—"
         state.dataSource = source?.dataSourceName ?? "—"
@@ -90,10 +123,14 @@ struct WearableMicState: Sendable {
 @MainActor
 final class WearableAudioPreferences {
     private let previousInput: AVAudioSessionPortDescription?
-    private let port: AVAudioSessionPortDescription
+    private var port: AVAudioSessionPortDescription
+    private let previousMode: AVAudioSession.Mode
+    private var modeChanged = false
+    private(set) var availableDataSources: [BuiltInMicDataSource] = []
+    private(set) var configurationStep = "session mode"
     private let previousDataSource: AVAudioSessionDataSourceDescription?
-    private let source: AVAudioSessionDataSourceDescription?
-    private let previousPattern: AVAudioSession.PolarPattern?
+    private var source: AVAudioSessionDataSourceDescription?
+    private var previousPattern: AVAudioSession.PolarPattern?
     private let previousOrientation: AVAudioSession.StereoOrientation
     private let previousChannels: Int
     private var inputChanged = false
@@ -107,44 +144,77 @@ final class WearableAudioPreferences {
         self.port = port
         previousInput = session.preferredInput
         previousDataSource = port.preferredDataSource
-        let candidates = port.dataSources?.filter { $0.supportedPolarPatterns?.contains(.stereo) == true } ?? []
-        // A deterministic logical orientation; physical L/R still needs the user's clap tests.
-        let selectedSource = candidates.first(where: { $0.orientation == .front }) ?? candidates.first
-        source = selectedSource
-        previousPattern = selectedSource?.preferredPolarPattern ?? selectedSource?.selectedPolarPattern
+        previousMode = session.mode
         previousOrientation = session.preferredInputOrientation
         // The API rejects 0. Preserve the effective baseline if no positive preference was set.
         previousChannels = session.preferredInputNumberOfChannels > 0
             ? session.preferredInputNumberOfChannels : max(1, session.inputNumberOfChannels)
     }
 
-    func requestStereo(_ session: AVAudioSession) throws {
+    func requestStereo(_ session: AVAudioSession) throws -> WearableStereoRequest {
+        // Wearable owner only. Measurement selects the primary mic; enumerate again in default mode.
+        // Apple: activate before availableInputs/input selection and channel-count requests.
+        // https://developer.apple.com/library/archive/qa/qa1799/_index.html
+        if session.mode != .default {
+            modeChanged = true
+            try session.setMode(.default)
+        }
+        configurationStep = "activate default-mode session"
+        try session.setActive(true)
+        configurationStep = "enumerate built-in microphone sources"
+        guard let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) else {
+            throw StereoConfigurationError(details: "No built-in microphone input is available.")
+        }
+        port = builtIn
+        let sources = port.dataSources ?? []
+        availableDataSources = sources.map { BuiltInMicDataSource($0) }
+        let candidates = sources.filter { $0.supportedPolarPatterns?.contains(.stereo) == true }
+        // Keep the existing front-first choice; never infer physical channel mapping from it.
+        source = candidates.first(where: { $0.orientation == .front }) ?? candidates.first
+        previousPattern = source?.preferredPolarPattern
+
+        configurationStep = "preferred built-in input"
         if session.preferredInput?.uid != port.uid {
-            try session.setPreferredInput(port)
             inputChanged = true
+            try session.setPreferredInput(port)
         }
-        guard let source else { return } // Supported mono path, not a capture failure.
-        if source.selectedPolarPattern != .stereo {
-            try source.setPreferredPolarPattern(.stereo)
+        guard let source else { return .noStereoSource } // Keep real mono capture / AI PCM working.
+
+        // Apple's stereo sample sets the source's pattern before selecting that source on the port.
+        // https://developer.apple.com/documentation/avfaudio/capturing-stereo-audio-from-built-in-microphones
+        configurationStep = "preferred stereo polar pattern"
+        if source.preferredPolarPattern != .stereo {
             patternChanged = true
+            try source.setPreferredPolarPattern(.stereo)
         }
-        if port.selectedDataSource?.dataSourceID != source.dataSourceID {
-            try port.setPreferredDataSource(source)
+        configurationStep = "preferred stereo data source"
+        if port.preferredDataSource?.dataSourceID != source.dataSourceID {
             sourceChanged = true
+            try port.setPreferredDataSource(source)
         }
+        configurationStep = "preferred portrait input orientation"
         if session.preferredInputOrientation != .portrait {
-            try session.setPreferredInputOrientation(.portrait)
             orientationChanged = true
+            try session.setPreferredInputOrientation(.portrait)
         }
-        if session.maximumInputNumberOfChannels >= 2, session.preferredInputNumberOfChannels != 2 {
-            try session.setPreferredInputNumberOfChannels(2)
+        // Query capacity only after the stereo source is applied to the active route.
+        configurationStep = "activate configured stereo source"
+        try session.setActive(true)
+        guard session.maximumInputNumberOfChannels >= 2 else { return .channelsUnavailable }
+        configurationStep = "preferred input channels = 2"
+        if session.preferredInputNumberOfChannels != 2 {
             channelsChanged = true
+            try session.setPreferredInputNumberOfChannels(2)
         }
+        // This records a request, not success. Session/node/buffer counts decide stereoUsable.
+        return .requested
     }
 
     func restore(_ session: AVAudioSession) throws {
         // Attempt every changed property; one failed call must not skip the other restorations.
         var failures: [String] = []
+        // A retry may begin in measurement mode. Restore stereo preferences in their valid mode.
+        if modeChanged && session.mode != .default { try session.setMode(.default) }
         if orientationChanged {
             do { try session.setPreferredInputOrientation(previousOrientation); orientationChanged = false }
             catch { failures.append("orientation: \(error.localizedDescription)") }
@@ -169,9 +239,19 @@ final class WearableAudioPreferences {
                 channelsChanged = false
             } catch { failures.append("channel count: \(error.localizedDescription)") }
         }
+        // Restore the baseline mode last; retain the snapshot if any earlier restoration failed.
+        if failures.isEmpty && modeChanged {
+            do { try session.setMode(previousMode); modeChanged = false }
+            catch { failures.append("session mode: \(error.localizedDescription)") }
+        }
         if !failures.isEmpty {
             throw PreferenceRestoreError(details: failures.joined(separator: "; "))
         }
+    }
+
+    private struct StereoConfigurationError: LocalizedError {
+        let details: String
+        var errorDescription: String? { details }
     }
 
     private struct PreferenceRestoreError: LocalizedError {

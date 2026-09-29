@@ -149,3 +149,19 @@
 "wearable.preparing" = "준비 중";
 "wearable.directionSensing" = "방향 감지";
 "wearable.advancedDiagnostics" = "고급 진단 정보";
+
+/* Wearable runtime stereo configuration (advanced diagnostics only). */
+"wearable.dataSourceCatalog" = "내장 데이터 소스 · 스테레오 요청 전";
+"wearable.noDataSourceSnapshot" = "데이터 소스 정보가 없습니다. 수음을 시작해 기기의 정보를 확인하세요.";
+"wearable.sourceLocation" = "위치";
+"wearable.sourceOrientation" = "방향";
+"wearable.sourceStereoSupport" = "스테레오 패턴 지원";
+"wearable.sessionCategory" = "세션 카테고리";
+"wearable.sessionMode" = "세션 모드";
+"wearable.stereoRequest" = "스테레오 설정 요청";
+"wearable.preferredChannels" = "요청한 입력 채널 수";
+"wearable.stereoRequest.notRequested" = "요청 전";
+"wearable.stereoRequest.noStereoSource" = "스테레오를 지원하는 내장 마이크 데이터 소스가 없습니다.";
+"wearable.stereoRequest.requested" = "스테레오를 요청했습니다. 실제 세션/노드/버퍼 채널 수를 확인하세요.";
+"wearable.stereoRequest.channelsUnavailable" = "스테레오 소스를 선택했지만 현재 경로에서 2채널 입력을 사용할 수 없습니다.";
+"wearable.stereoRequest.failed" = "스테레오 설정에 실패했습니다. 아래 오류를 확인하세요.";

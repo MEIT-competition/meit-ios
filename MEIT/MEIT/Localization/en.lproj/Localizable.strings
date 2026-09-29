@@ -149,3 +149,19 @@
 "wearable.preparing" = "Preparing";
 "wearable.directionSensing" = "Direction sensing";
 "wearable.advancedDiagnostics" = "Advanced diagnostics";
+
+/* Wearable runtime stereo configuration (advanced diagnostics only). */
+"wearable.dataSourceCatalog" = "Built-in data sources · before stereo request";
+"wearable.noDataSourceSnapshot" = "No data source snapshot is available. Start capture to inspect this device.";
+"wearable.sourceLocation" = "Location";
+"wearable.sourceOrientation" = "Orientation";
+"wearable.sourceStereoSupport" = "Stereo pattern support";
+"wearable.sessionCategory" = "Session category";
+"wearable.sessionMode" = "Session mode";
+"wearable.stereoRequest" = "Stereo configuration request";
+"wearable.preferredChannels" = "Preferred input channels";
+"wearable.stereoRequest.notRequested" = "Not requested";
+"wearable.stereoRequest.noStereoSource" = "no stereo-capable built-in microphone data source";
+"wearable.stereoRequest.requested" = "Stereo requested; verify actual session/node/buffer channels.";
+"wearable.stereoRequest.channelsUnavailable" = "Stereo source selected, but the active route allows fewer than 2 input channels.";
+"wearable.stereoRequest.failed" = "Stereo configuration failed; see the error below.";

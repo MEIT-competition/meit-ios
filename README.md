@@ -64,7 +64,7 @@ wearable mode iPhone audio
 - 기존 native input → 4-slot worker → 16 kHz mono PCM16LE → 2.5초 ring/snapshot을 재사용한다.
   **40,000 samples / 80,000 bytes / 2.5 sec**, PCM buffer ready까지 로컬에서 준비한다.
   Wearable에서는 registration, RMS reporting, command polling, AI upload, iPhone 진동을 시작하지 않는다.
-- 내장 입력의 stereo source/polar pattern을 요청하며, 실제 session/node/buffer가 모두 2채널이어야
+- 내장 입력의 stereo source/polar pattern을 요청하며, 실제 session/node/buffer가 모두 2채널 이상이어야
   stereoUsable이다. orientation은 별도 diagnostics/물리 mapping 정보로 유지한다.
   Mono는 정상 입력이며 AI용 mono PCM 준비는 계속된다.
 - 실제 stereo일 때 기존 tap의 약 100 ms window에서 channel 1/2 RMS와 absolute peak를 계산한다.
@@ -85,6 +85,36 @@ wearable mode iPhone audio
 - Wearable 캡처가 변경한 session preference는 종료 시 복원한다. 원래 preferred channel 수가 0이면
   API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 실패하면 표시하고 다음 시작 전에 재시도한다.
   기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
+
+### Wearable stereo configuration audit
+
+사용자 실기기 결과는 `.measurement` 경로에서 bottom / Omnidirectional, session/node/buffer 각각
+1채널, PCM 40,000 samples였다. 이 결과만으로 기기의 stereo 미지원이나 전체 source 목록을 확정하지 않는다.
+
+- iPhone mode는 기존 `.record + .measurement`를 유지한다. Wearable 소유자만 baseline preference를
+  저장한 뒤 `.record + .default`로 전환한다. 재생이 필요하지 않으므로 `.playAndRecord`는 사용하지 않는다.
+- 세션 활성화 후 `.default`에서 built-in port의 **모든** data source를 조사한다. 이름/location/orientation,
+  supported polar patterns와 stereo 지원 여부를 값 형태로 저장해 **고급 진단에만** 표시한다.
+  이 목록은 source 설정 전 snapshot이며 실제 선택 결과는 기존 selected source/pattern 항목에서 확인한다.
+- `.stereo` 지원 source 중 기존 front 우선, 없으면 첫 지원 source를 선택한다. 후보가 없으면
+  `no stereo-capable built-in microphone data source` 상태로 실제 mono 캡처를 계속한다.
+- Apple sample 순서대로 preferred built-in input → 후보 source의 preferred stereo pattern →
+  preferred data source → portrait orientation을 설정한다. 활성 상태에서 현재 maximum input channels가
+  2 이상일 때만 preferred channels=2를 요청한다. 채널 API는 **활성화 후** 호출해야 한다.
+- 고급 진단은 category/mode/preferred channels와 요청 상태도 표시한다. 요청 성공은 stereo 성공이 아니다.
+  실제 stereo source/pattern 및 session/node/buffer 각각 2채널 이상을 확인해야 stereoUsable이다.
+  기존 채널 1/2 분석을 재사용하고 물리 mapping=false, physical direction=UNAVAILABLE은 유지한다.
+- 종료/실패 시 변경한 input/source/pattern/orientation/channel preference와 baseline mode를 복원한다.
+  복원 실패는 상태를 보관해 다음 시작 전에 재시도하고, 해결 전에는 새 엔진을 시작하지 않는다.
+- AIInputProcessor/AIInputBuffer는 변경하지 않는다. 재검증 시 native stereo에서도
+  16 kHz mono PCM16LE / 40,000 samples / 2.5 s가 유지되는지 확인해야 한다.
+- 기본 진단 네 항목과 고급 화면 진입 구조는 유지한다. 실제 source 목록, stereo 성공 여부와
+  iPhone mode 복원은 새 IPA로 실기기에서 확인해야 하며 Windows 검사만으로 입증할 수 없다.
+
+근거: [Apple stereo capture sample](https://developer.apple.com/documentation/avfaudio/capturing-stereo-audio-from-built-in-microphones),
+[measurement mode](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/measurement),
+[input selection](https://developer.apple.com/library/archive/qa/qa1799/_index.html),
+[input channel request](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinputnumberofchannels(_:)).
 
 ### Mode lifecycle
 

@@ -61,7 +61,25 @@ private struct WearableAdvancedDiagnosticsView: View {
                     Text(language.text("wearable.stereoUnavailable")).foregroundStyle(.secondary)
                 }
             }
+            Section(language.text("wearable.dataSourceCatalog")) {
+                if state.availableDataSources.isEmpty {
+                    Text(language.text("wearable.noDataSourceSnapshot")).foregroundStyle(.secondary)
+                }
+                ForEach(state.availableDataSources) { source in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(source.name).font(.headline)
+                        value("wearable.sourceLocation", source.location)
+                        value("wearable.sourceOrientation", source.orientation)
+                        value("wearable.supportedPatterns", source.supportedPatterns)
+                        value("wearable.sourceStereoSupport", language.text(source.supportsStereo ? "wearable.available" : "wearable.unavailable"))
+                    }
+                }
+            }
             Section(language.text("wearable.inputConfiguration")) {
+                value("wearable.sessionCategory", state.sessionCategory)
+                value("wearable.sessionMode", state.sessionMode)
+                value("wearable.stereoRequest", language.text(state.stereoRequest.localizationKey))
+                value("wearable.preferredChannels", "\(state.preferredChannels)")
                 value("wearable.supportedPatterns", state.supportedPatterns)
                 value("wearable.selectedPattern", state.selectedPattern)
                 value("wearable.preferredOrientation", state.preferredOrientation)
