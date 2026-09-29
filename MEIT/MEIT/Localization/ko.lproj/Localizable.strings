@@ -197,8 +197,10 @@
 "wearable.avcapture.usesAppSession" = "AVCapture 앱 오디오 세션 사용";
 "wearable.avcapture.autoConfiguresSession" = "AVCapture 오디오 세션 자동 구성";
 "wearable.layout.tag" = "채널 layout tag";
-"wearable.layout.channel0" = "Channel 0 label";
-"wearable.layout.channel1" = "Channel 1 label";
-"wearable.layout.note" = "스트림 label이며 검증된 물리 매핑이 아닙니다. 제공되지 않거나 해석할 수 없는 label은 unknown입니다.";
+"wearable.layout.channel0" = "Channel 0 semantic label";
+"wearable.layout.channel1" = "Channel 1 semantic label";
+"wearable.layout.note" = "스트림 semantic label은 특정 물리 마이크 위치나 검증된 물리 LEFT/RIGHT 매핑을 의미하지 않습니다. 제공되지 않거나 해석할 수 없는 label은 unknown입니다.";
 "wearable.channelDelta" = "채널 차이 · CH1 − CH2";
 "wearable.channelDelta.value" = "%+.1f dB";
+
+"wearable.layout.name" = "채널 layout";

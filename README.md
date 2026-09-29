@@ -150,9 +150,15 @@ preferred orientation을 저장/복원했지만 시작 전에 특정 orientation
   preferred/actual을 읽기만 한다. Portrait confirmed는 requested/preferred/actual 모두 portrait,
   active mode=stereo, 실제 PCM 2채널 이상일 때만 true다. Stereo usable과 물리 mapping은 별개다.
 - 원본 CMSampleBuffer의 `CMAudioFormatDescriptionGetChannelLayout`에서 layout tag와 label을 조회한다.
-  명시적인 channel descriptions 또는 Core Audio가 표준 tag/bitmap을 확장한 descriptions만 사용한다.
+  `kAudioChannelLayoutTag_Stereo`(사용자 관측값 0x00650002)와 ASBD 2채널이 일치하면 Apple 정의에 따라
+  `Stereo (Left, Right)`, channel 0 semantic label=Left, channel 1 semantic label=Right로 표시한다.
+  이 tag는 explicit descriptions 없이도 순서를 정의한다. 다른 tag/bitmap은 기존 Core Audio 확장 결과의
+  검증된 descriptions만 사용하며, 임의의 순서나 layout 이름을 추측하지 않는다.
   크기/채널 수 검증 실패, metadata 부재, 해석 불가 시 unknown이다. 채널 수만으로 Left/Right를 만들지 않는다.
-  Label Left/Right가 있어도 stream role일 뿐 물리 방향으로 사용하지 않는다. PCM 변환/채널 순서를 바꾸지 않는다.
+  Label Left/Right가 있어도 stream role일 뿐 특정 물리 마이크 위치나 물리 방향으로 사용하지 않는다.
+  PCM 변환/채널 순서를 바꾸지 않는다. 이 metadata patch는 actual orientation=none 문제를 수정하거나
+  audio-session 자동 구성, estimator threshold, physical mapping을 변경하지 않는다.
+  근거: [Apple standard Stereo ordering](https://developer.apple.com/documentation/coreaudiotypes/kaudiochannellayouttag_stereo).
 - 고급 진단에 requested/preferred/actual, 실제 AVCapture audio-session flags, portrait confirmed,
   channel 0/1 label, layout tag, channel delta를 표시한다. 기본 진단과 iPhone Mode UI는 유지한다.
 - Channel delta는 표시된 CH1 RMS dBFS − CH2 RMS dBFS다. 기존 -100...0 dBFS clamp를 사용하므로

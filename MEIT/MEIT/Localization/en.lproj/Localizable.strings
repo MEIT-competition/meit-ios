@@ -197,8 +197,10 @@
 "wearable.avcapture.usesAppSession" = "AVCapture uses app audio session";
 "wearable.avcapture.autoConfiguresSession" = "AVCapture auto-configures audio session";
 "wearable.layout.tag" = "Channel layout tag";
-"wearable.layout.channel0" = "Channel 0 label";
-"wearable.layout.channel1" = "Channel 1 label";
-"wearable.layout.note" = "Stream labels only, not a verified physical mapping. Missing or undecodable labels are unknown.";
+"wearable.layout.channel0" = "Channel 0 semantic label";
+"wearable.layout.channel1" = "Channel 1 semantic label";
+"wearable.layout.note" = "Stream semantic labels do not identify physical microphone locations or verify physical LEFT/RIGHT mapping. Missing or undecodable labels are unknown.";
 "wearable.channelDelta" = "Channel delta · CH1 − CH2";
 "wearable.channelDelta.value" = "%+.1f dB";
+
+"wearable.layout.name" = "Channel layout";

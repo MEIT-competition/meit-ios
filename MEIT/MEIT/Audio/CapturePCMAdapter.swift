@@ -32,6 +32,7 @@ struct CapturePCMDescription: Sendable {
 // Core Audio labels describe stream roles; they do not prove a physical microphone mapping.
 struct CaptureChannelLayout: Sendable {
     var tag = "unknown"
+    var name = "unknown"
     var channel0Label = "unknown"
     var channel1Label = "unknown"
 
@@ -44,6 +45,16 @@ struct CaptureChannelLayout: Sendable {
         let raw = UnsafeRawPointer(layout)
         let tag = raw.load(as: AudioChannelLayoutTag.self)
         result.tag = String(format: "0x%08X", tag)
+        // This predefined tag itself specifies the stream order; explicit descriptions
+        // are not required. Never infer physical microphone locations from these labels.
+        // https://developer.apple.com/documentation/coreaudiotypes/kaudiochannellayouttag_stereo
+        if tag == kAudioChannelLayoutTag_Stereo {
+            guard channels == 2 else { return result } // Reject contradictory ASBD metadata.
+            result.name = "Stereo (Left, Right)"
+            result.channel0Label = "Left"
+            result.channel1Label = "Right"
+            return result
+        }
         if tag == kAudioChannelLayoutTag_UseChannelDescriptions {
             result.setLabels(raw, bytes: bytes, channels: channels)
             return result

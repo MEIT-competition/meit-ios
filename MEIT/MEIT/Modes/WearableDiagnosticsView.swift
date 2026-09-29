@@ -96,6 +96,7 @@ private struct WearableAdvancedDiagnosticsView: View {
                     value("wearable.avcapture.sampleRate", "\(pcm.sampleRate) Hz")
                     value("wearable.avcapture.pcmFormat", pcm.formatSummary)
                     value("wearable.layout.tag", pcm.channelLayout.tag)
+                    value("wearable.layout.name", pcm.channelLayout.name)
                     value("wearable.layout.channel0", pcm.channelLayout.channel0Label)
                     value("wearable.layout.channel1", pcm.channelLayout.channel1Label)
                     Text(language.text("wearable.layout.note")).foregroundStyle(.secondary)
