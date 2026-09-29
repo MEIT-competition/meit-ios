@@ -123,8 +123,10 @@ final class AudioCaptureManager: ObservableObject {
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.captureID == id, self.captureOwner == .wearableMode else { return }
                         let mode = self.wearableMic.activeMultichannelMode
+                        let captureSession = self.wearableMic.captureSession
                         self.wearableMic = .inspect(self.session, nodeChannels: 0)
                         self.wearableMic.activeMultichannelMode = mode
+                        self.wearableMic.captureSession = captureSession
                         self.wearableMic.capturePCM = format
                         self.wearableMic.bufferChannels = format.channels
                         self.wearableRouteSignature = self.currentWearableRouteSignature()
@@ -146,10 +148,13 @@ final class AudioCaptureManager: ObservableObject {
                     }
                 })
                 wearableCapture = capture
-                let mode = try await capture.start()
+                let captureSession = try await capture.start()
                 guard captureID == id, captureOwner == owner else { return }
                 if Task.isCancelled { stopCapture(owner: owner); return }
-                wearableMic.activeMultichannelMode = mode
+                wearableMic.activeMultichannelMode = captureSession.activeMode
+                wearableMic.captureSession = captureSession
+                wearableMic.preferredOrientation = captureSession.preferredOrientation
+                wearableMic.actualOrientation = captureSession.actualOrientation
                 isCapturing = true
                 return // Wearable never constructs an AVAudioEngine or installs an input tap.
             }
@@ -310,6 +315,9 @@ final class AudioCaptureManager: ObservableObject {
             stopForSystemEvent("iPhone microphone input changed. Turn the microphone on again to retry.")
             return
         }
+        // Read only while recording: never reapply orientation in a callback.
+        wearableMic.preferredOrientation = WearableMicState.orientationName(session.preferredInputOrientation)
+        wearableMic.actualOrientation = WearableMicState.orientationName(session.inputOrientation)
         wearableMic.bufferChannels = reading.channels
         // AVCapture PCM channels, not the legacy AVAudioSession polar-pattern/node path, prove stereo.
         let usable = wearableMic.activeMultichannelMode == "stereo" && reading.channels >= 2

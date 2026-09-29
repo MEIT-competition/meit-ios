@@ -50,6 +50,19 @@ struct WearableMicState: Sendable {
     var availableDataSources: [BuiltInMicDataSource] = []
     var activeMultichannelMode = "—"
     var capturePCM: CapturePCMDescription?
+    var captureSession: WearableCaptureSessionState?
+    // This is an orientation check, NOT a measured physical channel mapping.
+    var portraitOrientationConfirmed: Bool {
+        captureSession?.requestedOrientation == "portrait"
+            && preferredOrientation == "portrait" && actualOrientation == "portrait"
+            && activeMultichannelMode == "stereo" && stereoUsable && bufferChannels >= 2
+    }
+    // Unsmoothed displayed channel dBFS difference; positive means CH1 has higher level.
+    var channelDeltaDB: Double? {
+        guard stereoUsable, let channel1RMS, let channel2RMS,
+              channel1RMS.isFinite, channel2RMS.isFinite, channel1RMS >= 0, channel2RMS >= 0 else { return nil }
+        return StereoDirectionEstimator.dbFS(channel1RMS) - StereoDirectionEstimator.dbFS(channel2RMS)
+    }
     var sessionCategory = "—"
     var sessionMode = "—"
     var preferredChannels = 0
@@ -104,7 +117,7 @@ struct WearableMicState: Sendable {
         return state
     }
 
-    private static func orientationName(_ value: AVAudioSession.StereoOrientation) -> String {
+    static func orientationName(_ value: AVAudioSession.StereoOrientation) -> String {
         switch value {
         case .none: return "none"
         case .portrait: return "portrait"

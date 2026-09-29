@@ -88,10 +88,11 @@ wearable mode iPhone audio
   API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 실패하면 표시하고 다음 시작 전에 재시도한다.
   기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
 
-### Wearable AVCapture stereo backend — actual PCM validation pending
+### Wearable AVCapture stereo backend
 
 사용자 iPhone 16 기본 모델 capability 결과: input=true, stereo=true, FOA=true, 조회용 mode=none.
-이는 capability 확인이며 실제 stereo PCM 성공은 **이번 새 IPA에서 검증해야 한다**.
+후속 사용자 실기기 확인: active mode=stereo, actual PCM=2채널, stereo usable=true, AI buffer=40,000/40,000.
+이번 portrait orientation patch의 적용 결과와 반복 실행 안정성은 별도 실기기 검증이 필요하다.
 이전 AVAudioSession data-source 경로의 bottom/Omnidirectional/1채널 결과와 모순되지 않는다.
 
 - `wearableMode`만 `WearableStereoCapture` helper를 사용한다. iPhone mode의 `.record + .measurement`,
@@ -132,6 +133,46 @@ background/foreground 및 두 모드 빠른 왕복 → iPhone mode의 기존 추
 [PCM copy](https://developer.apple.com/documentation/coremedia/cmsamplebuffercopypcmdataintoaudiobufferlist(_:at:framecount:into:)),
 [format-only conversion](https://developer.apple.com/documentation/avfaudio/avaudioconverter/convert(to:from:)).
 
+### Wearable portrait orientation experiment — device validation pending
+
+사용자는 고정된 폰에서 재시작에 따라 CH1/CH2 공간 대응이 뒤집히는 현상을 관찰했다. 기존 코드는
+preferred orientation을 저장/복원했지만 시작 전에 특정 orientation을 요청하지 않았다.
+이것이 뒤집힘의 확정 원인이라는 뜻은 아니며, 아래 patch로 실제 적용 상태를 먼저 검증한다.
+
+- 물리 기준: portrait, 화면은 사용자 쪽, 상단/수화부는 위, USB-C 모서리는 아래다. 케이블은 연결하지 않는다.
+- Session queue에서 input/output `commitConfiguration()` 후 `startRunning()` 직전에
+  `setPreferredInputOrientation(.portrait)`를 호출한다. Recording 도중에는 호출하지 않는다.
+- `usesApplicationAudioSession=true`, `automaticallyConfiguresApplicationAudioSession=true`를 유지한다.
+  현재 성공한 stereo 자동 구성을 보존한다. Apple 문서는 자동 설정이 정확히 언제 끝나는지 보장하지 않으므로
+  commit만으로 orientation 적용 완료라고 간주하지 않는다. Start 후 shared session 값을 다시 읽는다.
+  자동 구성으로 덮어써져도 capture 중 재설정하지 않고, 고급 진단에서 미확인 상태로 표시한다.
+- Requested는 이번 시작에 전달한 값, preferred/actual은 시작 후 조회값이다. PCM reading 시에도
+  preferred/actual을 읽기만 한다. Portrait confirmed는 requested/preferred/actual 모두 portrait,
+  active mode=stereo, 실제 PCM 2채널 이상일 때만 true다. Stereo usable과 물리 mapping은 별개다.
+- 원본 CMSampleBuffer의 `CMAudioFormatDescriptionGetChannelLayout`에서 layout tag와 label을 조회한다.
+  명시적인 channel descriptions 또는 Core Audio가 표준 tag/bitmap을 확장한 descriptions만 사용한다.
+  크기/채널 수 검증 실패, metadata 부재, 해석 불가 시 unknown이다. 채널 수만으로 Left/Right를 만들지 않는다.
+  Label Left/Right가 있어도 stream role일 뿐 물리 방향으로 사용하지 않는다. PCM 변환/채널 순서를 바꾸지 않는다.
+- 고급 진단에 requested/preferred/actual, 실제 AVCapture audio-session flags, portrait confirmed,
+  channel 0/1 label, layout tag, channel delta를 표시한다. 기본 진단과 iPhone Mode UI는 유지한다.
+- Channel delta는 표시된 CH1 RMS dBFS − CH2 RMS dBFS다. 기존 -100...0 dBFS clamp를 사용하므로
+  silence는 유한 값(양쪽 silence면 0 dB)이며 방향 판정이 아니다. Estimator의 EMA/threshold는 그대로다.
+- 종료 시 기존 stop/drain barrier 후 저장한 orientation을 포함한 session preferences를 복원한다.
+  다음 backend는 정리 완료를 기다린다. 이 patch는 AI converter/ring, iPhone mode, network/AI 서버 연결을 변경하지 않는다.
+
+실기기 절차: 폰을 움직이지 않고 같은 음원 위치/음량으로 Start → 소리 → 기록 → Stop을 **최소 5회** 반복한다.
+각 회차에 requested/preferred/actual, active mode, 실제 채널 수, 두 session flags, channel 0/1 label,
+layout tag, CH1/CH2 RMS·peak, delta, dominance를 기록한다. 세 orientation 모두 portrait여야 하며,
+같은 위치 음원에서 채널 대응이 뒤집히지 않는지 확인한다. Physical direction은 계속 UNAVAILABLE이다.
+40,000/40,000 samples 유지, background/foreground와 iPhone Mode 왕복 후 기존 기능도 확인한다.
+안정화 이후 별도 실험에서 LEFT/CENTER/RIGHT 위치별 delta 분포를 측정한다. 이번에는 mapping하지 않는다.
+Windows 검사로 orientation 안정성이나 Swift/Xcode build 성공을 주장하지 않는다.
+
+근거: [input orientation](https://developer.apple.com/documentation/avfaudio/avaudiosession/inputorientation),
+[preferred orientation](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinputorientation(_:)),
+[automatic configuration](https://developer.apple.com/documentation/avfoundation/avcapturesession/automaticallyconfiguresapplicationaudiosession),
+[channel layout](https://developer.apple.com/documentation/coremedia/cmaudioformatdescriptiongetchannellayout(_:sizeout:)).
+
 ### AVCapture multichannel capability probe — iPhone 16
 
 실제 대상은 iPhone 16 기본 모델이다. Apple 사양의 Spatial Audio / stereo recording 지원과
@@ -160,7 +201,7 @@ background/foreground 및 두 모드 빠른 왕복 → iPhone mode의 기존 추
 실기기 확인: 새 IPA 설치 → Wearable Start로 권한 허용 → 진단 정보 → 고급 진단 정보에서
 네 조회 값을 기록한다. Native mono 여부와 별도로 비교하고, 조회 후에도 RMS와 40,000-sample
 AI buffer, Start/Stop 및 iPhone mode가 정상인지 확인한다. Probe true/true는 사용자 확인 결과이며
-새 backend의 실제 PCM 수음은 아직 미검증이다.
+기존 backend의 실제 stereo PCM과 40,000-sample 준비는 사용자 확인 결과다. 이번 portrait patch의 안정성은 재검증해야 한다.
 
 근거: [iPhone 16 사양](https://support.apple.com/ko-kr/121029),
 [capability query](https://developer.apple.com/documentation/avfoundation/avcapturedeviceinput/ismultichannelaudiomodesupported(_:)),

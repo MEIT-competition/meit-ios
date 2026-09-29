@@ -2,6 +2,16 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
+// Values read after startRunning; separate from the disconnected capability probe.
+struct WearableCaptureSessionState: Sendable {
+    let activeMode: String
+    let requestedOrientation: String
+    let preferredOrientation: String
+    let actualOrientation: String
+    let usesAppAudioSession: Bool
+    let autoConfiguresAudioSession: Bool
+}
+
 // MainActor owns this helper's lifetime. Session, delivery and PCM worker queues own disjoint state.
 // @unchecked Sendable is this confinement contract, not permission for arbitrary shared mutation.
 final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
@@ -50,7 +60,7 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
         if cancelled { throw CancellationError() }
     }
 
-    func start() async throws -> String {
+    func start() async throws -> WearableCaptureSessionState {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [self] in
                 do { continuation.resume(returning: try configureAndStart()) }
@@ -67,7 +77,7 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
         }
     }
 
-    private func configureAndStart() throws -> String {
+    private func configureAndStart() throws -> WearableCaptureSessionState {
         try checkStartCancellation()
         guard #available(iOS 18.0, *) else { throw CapturePCMError("Wearable stereo capture requires iOS 18 or later.") }
         guard let device = AVCaptureDevice.default(.microphone, for: .audio, position: .unspecified) else {
@@ -113,6 +123,13 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
             self?.reportFailure("Wearable capture was interrupted. Tap Start to retry.")
         })
         try checkStartCancellation()
+        // Apply AFTER input/output configuration is committed, BEFORE any recording starts.
+        // Auto-configuration may still change preferences at startRunning: verify afterward,
+        // never repair orientation during recording or disable the proven stereo configuration.
+        let audioSession = AVAudioSession.sharedInstance()
+        let requestedOrientation: AVAudioSession.StereoOrientation = .portrait
+        try audioSession.setPreferredInputOrientation(requestedOrientation)
+        try checkStartCancellation()
         deliveryQueue.sync { accepting = true }
         capture.startRunning() // Blocking API stays off MainActor and outside configuration brackets.
         guard capture.isRunning else { throw CapturePCMError("AVCaptureSession did not start.") }
@@ -122,7 +139,12 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
         guard deviceInput.multichannelAudioMode == .stereo else {
             throw CapturePCMError("Active AVCapture multichannel mode changed unexpectedly.")
         }
-        return "stereo"
+        return WearableCaptureSessionState(activeMode: "stereo",
+            requestedOrientation: WearableMicState.orientationName(requestedOrientation),
+            preferredOrientation: WearableMicState.orientationName(audioSession.preferredInputOrientation),
+            actualOrientation: WearableMicState.orientationName(audioSession.inputOrientation),
+            usesAppAudioSession: capture.usesApplicationAudioSession,
+            autoConfiguresAudioSession: capture.automaticallyConfiguresApplicationAudioSession)
     }
 
     private func cleanup() {

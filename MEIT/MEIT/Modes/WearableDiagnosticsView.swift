@@ -89,9 +89,16 @@ private struct WearableAdvancedDiagnosticsView: View {
                 value("wearable.sessionCategory", state.sessionCategory)
                 value("wearable.sessionMode", state.sessionMode)
                 value("wearable.avcapture.activeMode", state.activeMultichannelMode)
+                value("wearable.orientation.requested", state.captureSession?.requestedOrientation ?? "—")
+                value("wearable.avcapture.usesAppSession", capabilityText(state.captureSession?.usesAppAudioSession))
+                value("wearable.avcapture.autoConfiguresSession", capabilityText(state.captureSession?.autoConfiguresAudioSession))
                 if let pcm = state.capturePCM {
                     value("wearable.avcapture.sampleRate", "\(pcm.sampleRate) Hz")
                     value("wearable.avcapture.pcmFormat", pcm.formatSummary)
+                    value("wearable.layout.tag", pcm.channelLayout.tag)
+                    value("wearable.layout.channel0", pcm.channelLayout.channel0Label)
+                    value("wearable.layout.channel1", pcm.channelLayout.channel1Label)
+                    Text(language.text("wearable.layout.note")).foregroundStyle(.secondary)
                     value("wearable.avcapture.interleaving", language.text(pcm.interleaved ? "wearable.avcapture.interleaved" : "wearable.avcapture.planar"))
                 }
                 value("wearable.preferredChannels", "\(state.preferredChannels)")
@@ -99,6 +106,7 @@ private struct WearableAdvancedDiagnosticsView: View {
                 value("wearable.selectedPattern", state.selectedPattern)
                 value("wearable.preferredOrientation", state.preferredOrientation)
                 value("wearable.actualOrientation", state.actualOrientation)
+                value("wearable.orientation.confirmed", capabilityText(state.captureSession == nil ? nil : state.portraitOrientationConfirmed))
                 if let note = state.configurationNote { Text(note).foregroundStyle(.secondary) }
             }
             Section(language.text("wearable.channelLevels")) {
@@ -106,6 +114,7 @@ private struct WearableAdvancedDiagnosticsView: View {
                 level("wearable.channel1Peak", state.channel1Peak)
                 level("wearable.channel2RMS", state.channel2RMS)
                 level("wearable.channel2Peak", state.channel2Peak)
+                value("wearable.channelDelta", state.channelDeltaDB.map { language.text("wearable.channelDelta.value", $0) } ?? "—")
                 value("wearable.channelDominance", language.text(state.channelDominance.localizationKey))
                 value("wearable.logicalMapping", language.text("wearable.mappingUnverified"))
                 value("wearable.estimatedDirection", language.text(state.direction.localizationKey))

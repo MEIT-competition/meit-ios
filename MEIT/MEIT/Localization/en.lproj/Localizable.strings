@@ -190,3 +190,15 @@
 "wearable.avcapture.interleaving" = "Actual PCM interleaving";
 "wearable.avcapture.interleaved" = "Interleaved";
 "wearable.avcapture.planar" = "Non-interleaved";
+
+/* Wearable portrait orientation and read-only native channel metadata. */
+"wearable.orientation.requested" = "Requested stereo orientation";
+"wearable.orientation.confirmed" = "Portrait orientation confirmed";
+"wearable.avcapture.usesAppSession" = "AVCapture uses app audio session";
+"wearable.avcapture.autoConfiguresSession" = "AVCapture auto-configures audio session";
+"wearable.layout.tag" = "Channel layout tag";
+"wearable.layout.channel0" = "Channel 0 label";
+"wearable.layout.channel1" = "Channel 1 label";
+"wearable.layout.note" = "Stream labels only, not a verified physical mapping. Missing or undecodable labels are unknown.";
+"wearable.channelDelta" = "Channel delta · CH1 − CH2";
+"wearable.channelDelta.value" = "%+.1f dB";

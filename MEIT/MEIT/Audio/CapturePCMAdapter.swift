@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import CoreMedia
 import Foundation
 
@@ -9,8 +10,10 @@ struct CapturePCMDescription: Sendable {
     let flags: UInt32
     let bitsPerChannel: UInt32
     let interleaved: Bool
+    let channelLayout: CaptureChannelLayout
 
-    init(_ asbd: AudioStreamBasicDescription) {
+    init(_ asbd: AudioStreamBasicDescription, formatDescription: CMAudioFormatDescription) {
+        channelLayout = CaptureChannelLayout.read(formatDescription, channels: Int(asbd.mChannelsPerFrame))
         sampleRate = asbd.mSampleRate
         channels = Int(asbd.mChannelsPerFrame)
         formatID = asbd.mFormatID
@@ -22,6 +25,74 @@ struct CapturePCMDescription: Sendable {
     var formatSummary: String {
         let id = formatID == kAudioFormatLinearPCM ? "lpcm" : String(format: "0x%08X", formatID)
         return "\(id) · flags=\(String(format: "0x%08X", flags)) · \(bitsPerChannel)-bit"
+    }
+}
+
+// Read-only metadata from the ORIGINAL CMSampleBuffer, never from the Float32 adapter.
+// Core Audio labels describe stream roles; they do not prove a physical microphone mapping.
+struct CaptureChannelLayout: Sendable {
+    var tag = "unknown"
+    var channel0Label = "unknown"
+    var channel1Label = "unknown"
+
+    static func read(_ description: CMAudioFormatDescription, channels: Int) -> Self {
+        var result = Self()
+        var bytes = 0
+        guard let layout = CMAudioFormatDescriptionGetChannelLayout(description, sizeOut: &bytes),
+              let headerSize = MemoryLayout<AudioChannelLayout>.offset(of: \.mChannelDescriptions),
+              bytes >= headerSize else { return result }
+        let raw = UnsafeRawPointer(layout)
+        let tag = raw.load(as: AudioChannelLayoutTag.self)
+        result.tag = String(format: "0x%08X", tag)
+        if tag == kAudioChannelLayoutTag_UseChannelDescriptions {
+            result.setLabels(raw, bytes: bytes, channels: channels)
+            return result
+        }
+        // A supplied standard tag/bitmap defines labels. Expand it using Core Audio;
+        // do not infer Stereo/Left/Right merely because the ASBD has two channels.
+        let property: AudioFormatPropertyID
+        var specifier: UInt32
+        if tag == kAudioChannelLayoutTag_UseChannelBitmap {
+            property = kAudioFormatProperty_ChannelLayoutForBitmap
+            guard let offset = MemoryLayout<AudioChannelLayout>.offset(of: \.mChannelBitmap) else { return result }
+            specifier = raw.load(fromByteOffset: offset, as: AudioChannelBitmap.self).rawValue
+        } else {
+            property = kAudioFormatProperty_ChannelLayoutForTag
+            specifier = tag
+        }
+        var size: UInt32 = 0
+        let specifierSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioFormatGetPropertyInfo(property, specifierSize, &specifier, &size) == noErr,
+              size >= UInt32(headerSize), size <= 4096 else { return result }
+        let expanded = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioChannelLayout>.alignment)
+        defer { expanded.deallocate() }
+        let capacity = size
+        guard AudioFormatGetProperty(property, specifierSize, &specifier, &size, expanded) == noErr,
+              size <= capacity else { return result }
+        result.setLabels(UnsafeRawPointer(expanded), bytes: Int(size), channels: channels)
+        return result
+    }
+
+    private mutating func setLabels(_ raw: UnsafeRawPointer, bytes: Int, channels: Int) {
+        guard let offset = MemoryLayout<AudioChannelLayout>.offset(of: \.mChannelDescriptions),
+              let countOffset = MemoryLayout<AudioChannelLayout>.offset(of: \.mNumberChannelDescriptions),
+              bytes >= offset,
+              raw.load(as: AudioChannelLayoutTag.self) == kAudioChannelLayoutTag_UseChannelDescriptions else { return }
+        let count = Int(raw.load(fromByteOffset: countOffset, as: UInt32.self))
+        let stride = MemoryLayout<AudioChannelDescription>.stride
+        guard count == channels, count <= (bytes - offset) / stride else { return }
+        if count > 0 { channel0Label = Self.label(raw.load(fromByteOffset: offset, as: AudioChannelDescription.self).mChannelLabel) }
+        if count > 1 { channel1Label = Self.label(raw.load(fromByteOffset: offset + stride, as: AudioChannelDescription.self).mChannelLabel) }
+    }
+
+    private static func label(_ value: AudioChannelLabel) -> String {
+        switch value {
+        case kAudioChannelLabel_Left: return "Left"
+        case kAudioChannelLabel_Right: return "Right"
+        case kAudioChannelLabel_Center: return "Center"
+        case kAudioChannelLabel_Mono: return "Mono"
+        default: return String(format: "unknown (label 0x%08X)", value)
+        }
     }
 }
 
@@ -41,7 +112,7 @@ final class CapturePCMAdapter {
             throw CapturePCMError("AVCapture returned no audio stream description.")
         }
         var asbd = pointer.pointee
-        let info = CapturePCMDescription(asbd)
+        let info = CapturePCMDescription(asbd, formatDescription: formatDescription)
         description = info
         // Inspect native ASBD before constructing any PCM buffers; never assume Float32 or 48 kHz.
         guard asbd.mFormatID == kAudioFormatLinearPCM, asbd.mSampleRate.isFinite,
