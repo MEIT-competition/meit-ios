@@ -29,8 +29,8 @@ struct StereoDirectionEstimatorTests {
         direct.smoothingAlpha = 1
         var estimator = StereoDirectionEstimator(configuration: direct)
         let sequence: [(Double, WearableDirection)] = [
-            (0.6, .center), (0.7, .left), (0.5, .left), (0.3, .left), (0.2, .center),
-            (-0.6, .center), (-0.7, .right), (-0.5, .right), (-0.3, .right), (-0.2, .center)
+            (0.6, .center), (0.7, .left), (0.6, .left), (0.5, .left), (0.49, .center),
+            (-0.6, .center), (-0.7, .right), (-0.6, .right), (-0.5, .right), (-0.49, .center)
         ]
         for (delta, expected) in sequence {
             expect(estimator.update(leftRMS: leftAmplitude(delta: delta), rightRMS: 0.1,
@@ -61,7 +61,7 @@ struct StereoDirectionEstimatorTests {
         for _ in 0..<12 { _ = smoothed.update(leftRMS: left, rightRMS: 0.1, stereoUsable: true) }
         expect(smoothed.state == .left, "sustained level crosses entry")
         for _ in 0..<12 {
-            expect(smoothed.update(leftRMS: leftAmplitude(delta: 0.5), rightRMS: 0.1, stereoUsable: true) == .left, "stable in hysteresis band")
+            expect(smoothed.update(leftRMS: leftAmplitude(delta: 0.6), rightRMS: 0.1, stereoUsable: true) == .left, "stable in hysteresis band")
         }
         expect(smoothed.update(leftRMS: 0, rightRMS: 0, stereoUsable: true) == .unavailable, "silence clears immediately")
         expect(smoothed.smoothedDeltaDB == nil, "silence clears delta")

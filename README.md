@@ -72,7 +72,7 @@ wearable mode iPhone audio
 - 실제 stereo일 때 기존 RMS meter의 약 100 ms window에서 channel 1/2 RMS와 absolute peak를 계산한다.
   planar/interleaved stride와 기존 aggregate RMS/live meter를 유지하며 별도 DSP pipeline을 추가하지 않는다.
 - `StereoDirectionEstimator`의 linear RMS EMA(alpha=0.25), silence=-65 dBFS는 유지한다.
-  기존 3 dB margin을 Wearable 실측 실험용 진입 ±0.7 dB / 해제 ±0.3 dB hysteresis로 교체했다.
+  기존 3 dB margin을 Wearable 실측 실험용 진입 ±0.7 dB / 해제 ±0.5 dB hysteresis로 교체했다.
   CH1=PCM channel 0, CH2=PCM channel 1이다. EMA된 선형 RMS를 dB로 바꾼 차이로 분류한다.
   무음·invalid·mono·semantic mapping 상실은 unavailable 및 smoothing/state reset이다.
 - `stereoSemanticMappingAvailable`은 원본 standard Stereo tag와 2채널 ASBD 확인을 뜻한다.
@@ -184,13 +184,13 @@ Windows 검사로 orientation 안정성이나 Swift/Xcode build 성공을 주장
 ### Wearable RMS semantic direction — device validation pending
 
 사용자 관측: LEFT delta 약 0...+3 dB, CENTER 약 0...+0.5 dB, RIGHT 약 0...−2 dB.
-범위가 겹치므로 ±0.7/±0.3 dB는 실험 초기값이며 방향 정확도를 보장하는 calibration은 아니다.
+범위가 겹치므로 ±0.7/±0.5 dB는 실험 초기값이며 방향 정확도를 보장하는 calibration은 아니다.
 Orientation 요청/actual=none 문제와 AVCapture 자동 구성은 이번 patch에서 변경하지 않는다.
 
 - 기존 estimator 하나만 사용한다. 선형 CH1/CH2 RMS EMA(alpha=0.25) 후
   `20 log10(smoothed CH1) − 20 log10(smoothed CH2)`를 사용한다. 0 근처는 기존 meter의 -100 dBFS floor다.
 - CENTER(또는 초기 unavailable)에서 delta >= +0.7이면 LEFT, <= -0.7이면 RIGHT, 그 사이는 CENTER.
-  LEFT는 >= +0.3에서 유지, 그 미만이면 CENTER. RIGHT는 <= -0.3에서 유지, 그 초과면 CENTER.
+  LEFT는 >= +0.5에서 유지, 그 미만이면 CENTER. RIGHT는 <= -0.5에서 유지, 그 초과면 CENTER.
   반대쪽으로 바로 전환하지 않고 최소 한 update에서 CENTER를 거친다. 일정 시간 유지하는 timer는 추가하지 않았다.
 - 기존 -65 dBFS silence gate를 raw 입력에 먼저 적용한다. 둘 다 threshold 이하, 음수/NaN/Inf,
   mono/불명확한 mapping이면 즉시 unavailable로 바꾸고 EMA/상태/delta를 초기화한다.
@@ -206,11 +206,11 @@ Orientation 요청/actual=none 문제와 AVCapture 자동 구성은 이번 patch
   AIInputProcessor/AIInputBuffer 및 기존 iPhone Mode는 변경하지 않았다.
 
 실기기: 고정된 portrait 상태와 일정한 소리로 LEFT/CENTER/RIGHT 위치를 반복 비교한다.
-Raw와 smoothed delta를 함께 기록하고 +0.7 진입/+0.3 해제, -0.7 진입/-0.3 해제를 관찰한다.
-0.3...0.7 또는 -0.7...-0.3 구간에서는 직전 상태에 따라 결과가 달라지는 것이 정상이다.
+Raw와 smoothed delta를 함께 기록하고 +0.7 진입/+0.5 해제, -0.7 진입/-0.5 해제를 관찰한다.
+0.5...0.7 또는 -0.7...-0.5 구간에서는 직전 상태에 따라 결과가 달라지는 것이 정상이다.
 반대쪽 이동은 CENTER 경유, 무음은 즉시 Unavailable, Start/Stop은 이전 상태가 남지 않아야 한다.
 Actual orientation=none 진단은 그대로 기록한다. 40,000/40,000 samples, live RMS와 iPhone Mode 복귀도 회귀 확인한다.
-Swift tests에는 요청한 8개 전환, ±0.3 유지 경계, 반대편 직접 점프 방지, 실제 기본 EMA의 지연/유지,
+Swift tests에는 요청한 8개 전환, ±0.5 유지 경계, 반대편 직접 점프 방지, 실제 기본 EMA의 지연/유지,
 silence/gate loss/invalid 입력/reset을 추가했다. 로컬 Swift compiler 및 Xcode test target이 없어 **추가만 했고 실행하지 않았다**.
 
 ### AVCapture multichannel capability probe — iPhone 16

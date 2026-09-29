@@ -3,7 +3,7 @@ import Foundation
 // Wearable experimental defaults from device trials, not AI thresholds or physical calibration.
 struct StereoDirectionConfiguration: Sendable {
     var enterThresholdDB = 0.7
-    var releaseThresholdDB = 0.3
+    var releaseThresholdDB = 0.5
     var silenceDBFS = -65.0
     var smoothingAlpha = 0.25
 }
