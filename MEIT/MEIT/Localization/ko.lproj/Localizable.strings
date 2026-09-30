@@ -230,3 +230,19 @@
 "wearable.ai.error.unsupported_label" = "분류기가 지원하지 않는 label을 반환했습니다.";
 "wearable.ai.error.stale_event" = "오디오 이벤트가 만료되었습니다. 다음 이벤트를 기다립니다.";
 "wearable.ai.error.request" = "AI 요청에 실패했습니다. 고급 진단을 확인하세요.";
+
+"settings.required" = "설정 필요";
+"wearable.lifecycle.title" = "캡처 lifecycle";
+"wearable.lifecycle.state" = "캡처 상태";
+"wearable.lifecycle.stop" = "최근 Stop 결과";
+"wearable.lifecycle.restore" = "최근 복원 결과";
+"wearable.lifecycle.savedPreferred" = "저장된 preferred orientation";
+"wearable.lifecycle.savedActual" = "저장된 actual orientation (읽기 전용)";
+"wearable.lifecycle.started" = "Start 이후: preferred / actual";
+"wearable.lifecycle.stopped" = "Stop 직전: preferred / actual";
+"wearable.lifecycle.context" = "복원 직전: category / mode / 앱 활성화 상태";
+"wearable.lifecycle.orientation" = "Orientation 복원 처리";
+"wearable.lifecycle.restored" = "복원 후 preferred orientation";
+"wearable.lifecycle.field" = "복원 실패 항목";
+"wearable.lifecycle.error" = "복원 오류 코드 / 상세";
+"wearable.lifecycle.target" = "최근 orientation 복원 대상";

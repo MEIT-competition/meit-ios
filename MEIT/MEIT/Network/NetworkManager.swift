@@ -39,9 +39,13 @@ private final class RejectRedirects: NSObject, URLSessionTaskDelegate {
 
 @MainActor
 final class NetworkManager: ObservableObject {
-    @Published var serverAddress = "" {
+    private let defaults: UserDefaults
+    private static let serverAddressKey = "meit.serverAddress"
+
+    @Published var serverAddress: String {
         didSet {
             if serverAddress != oldValue {
+                defaults.set(serverAddress, forKey: Self.serverAddressKey)
                 cancel()
                 stopWearableInference()
                 connectionStatus = "Not Tested"
@@ -67,6 +71,16 @@ final class NetworkManager: ObservableObject {
     private var operationID: UUID?
     private let session = NetworkManager.makeSession(resourceTimeout: 60)
     private let coordinationSession = NetworkManager.makeSession(resourceTimeout: 1)
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        serverAddress = defaults.string(forKey: Self.serverAddressKey) ?? ""
+        // An address is configuration, never evidence of a live connection.
+    }
+
+    var configuredServerAddress: String {
+        serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     nonisolated private static func makeSession(resourceTimeout: TimeInterval) -> URLSession {
         let config = URLSessionConfiguration.ephemeral

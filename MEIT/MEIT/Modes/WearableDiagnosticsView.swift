@@ -47,6 +47,23 @@ private struct WearableAdvancedDiagnosticsView: View {
 
     var body: some View {
         List {
+            Section(language.text("wearable.lifecycle.title")) {
+                value("wearable.lifecycle.state", audio.lifecycle.phase.rawValue)
+                value("wearable.lifecycle.stop", audio.lifecycleDiagnostics.lastStop)
+                value("wearable.lifecycle.restore", audio.lifecycleDiagnostics.lastRestore)
+                value("wearable.lifecycle.savedPreferred", audio.lifecycleDiagnostics.savedPreferred)
+                value("wearable.lifecycle.savedActual", audio.lifecycleDiagnostics.savedActual)
+                value("wearable.lifecycle.started", "\(audio.lifecycleDiagnostics.startedPreferred) / \(audio.lifecycleDiagnostics.startedActual)")
+                value("wearable.lifecycle.stopped", "\(audio.lifecycleDiagnostics.stoppedPreferred) / \(audio.lifecycleDiagnostics.stoppedActual)")
+                value("wearable.lifecycle.context", audio.lifecycleDiagnostics.restoreContext)
+                value("wearable.lifecycle.target", audio.lifecycleDiagnostics.restore.orientationTarget)
+                value("wearable.lifecycle.orientation", audio.lifecycleDiagnostics.restore.orientationResult)
+                value("wearable.lifecycle.restored", audio.lifecycleDiagnostics.restore.restoredPreferredOrientation)
+                value("wearable.lifecycle.field", audio.lifecycleDiagnostics.restore.issues.map(\.field).joined(separator: "; ").isEmpty
+                      ? "—" : audio.lifecycleDiagnostics.restore.issues.map(\.field).joined(separator: "; "))
+                value("wearable.lifecycle.error", audio.lifecycleDiagnostics.restore.issues.map(\.code).joined(separator: "; ").isEmpty
+                      ? "—" : audio.lifecycleDiagnostics.restore.summary)
+            }
             Section(language.text("wearable.stereoInput")) {
                 value("wearable.audioInput", language.text("wearable.iPhoneMicrophone"))
                 value("wearable.inputPort", state.inputPort)

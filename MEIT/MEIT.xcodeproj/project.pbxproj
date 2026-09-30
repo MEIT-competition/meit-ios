@@ -28,6 +28,7 @@
 		B10000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */; };
 		B10000000000000000000005 /* WearableStereoCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* WearableStereoCapture.swift */; };
 		B10000000000000000000006 /* CapturePCMAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* CapturePCMAdapter.swift */; };
+		B10000000000000000000007 /* CaptureLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* CaptureLifecycle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVCaptureAudioCapabilityProbe.swift; sourceTree = "<group>"; };
 		B20000000000000000000005 /* WearableStereoCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearableStereoCapture.swift; sourceTree = "<group>"; };
 		B20000000000000000000006 /* CapturePCMAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePCMAdapter.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* CaptureLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureLifecycle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,6 +105,7 @@
 			children = (
 				A20000000000000000000004 /* AudioCaptureManager.swift */,
 				B20000000000000000000002 /* WearableMicState.swift */,
+				B20000000000000000000007 /* CaptureLifecycle.swift */,
 				B20000000000000000000004 /* AVCaptureAudioCapabilityProbe.swift */,
 				B20000000000000000000006 /* CapturePCMAdapter.swift */,
 				B20000000000000000000005 /* WearableStereoCapture.swift */,
@@ -233,6 +236,7 @@
 				B10000000000000000000006 /* CapturePCMAdapter.swift in Sources */,
 				B10000000000000000000005 /* WearableStereoCapture.swift in Sources */,
 				B10000000000000000000002 /* WearableMicState.swift in Sources */,
+				B10000000000000000000007 /* CaptureLifecycle.swift in Sources */,
 				B10000000000000000000001 /* StereoDirectionEstimator.swift in Sources */,
 				A10000000000000000000005 /* AIInputProcessor.swift in Sources */,
 				A10000000000000000000004 /* AIInputBuffer.swift in Sources */,

@@ -14,6 +14,8 @@ final class AudioCaptureManager: ObservableObject {
         case denied
     }
 
+    @Published private(set) var lifecycle = CaptureLifecycle()
+    @Published private(set) var lifecycleDiagnostics = MicrophoneLifecycleDiagnostics()
     @Published private(set) var captureOwner: CaptureOwner = .none
     @Published private(set) var wearableMic = WearableMicState()
     @Published private(set) var isCapturing = false
@@ -88,6 +90,12 @@ final class AudioCaptureManager: ObservableObject {
             wearableStopTask = nil
             errorMessage = nil // A failed old cleanup will be retried below; do not keep a stale error after success.
         }
+        guard lifecycle.beginStart() else {
+            captureID = nil
+            captureOwner = .none
+            isStarting = false
+            return
+        }
         refreshPermission()
         if microphonePermission == .notDetermined {
             _ = await AVAudioApplication.requestRecordPermission()
@@ -101,6 +109,7 @@ final class AudioCaptureManager: ObservableObject {
             isStarting = false
             captureID = nil
             captureOwner = .none
+            lifecycle.finishStop()
             return
         }
 
@@ -118,6 +127,8 @@ final class AudioCaptureManager: ObservableObject {
                 wearableEstimator.reset()
                 wearablePreferences = WearableAudioPreferences(session: session)
                 guard let preferences = wearablePreferences else { throw CaptureError.unavailableInput }
+                lifecycleDiagnostics.savedPreferred = preferences.savedPreferredOrientation
+                lifecycleDiagnostics.savedActual = preferences.savedActualOrientation
                 try preferences.prepareForCapture(session)
                 let capture = WearableStereoCapture(onPrepared: { [weak self] format, processor in
                     DispatchQueue.main.async { [weak self] in
@@ -155,7 +166,10 @@ final class AudioCaptureManager: ObservableObject {
                 wearableMic.captureSession = captureSession
                 wearableMic.preferredOrientation = captureSession.preferredOrientation
                 wearableMic.actualOrientation = captureSession.actualOrientation
+                lifecycleDiagnostics.startedPreferred = captureSession.preferredOrientation
+                lifecycleDiagnostics.startedActual = captureSession.actualOrientation
                 isCapturing = true
+                lifecycle.didStart()
                 return // Wearable never constructs an AVAudioEngine or installs an input tap.
             }
 
@@ -199,6 +213,7 @@ final class AudioCaptureManager: ObservableObject {
             try newEngine.start()
             inputFormatDescription = "\(Int(format.sampleRate)) Hz · \(format.channelCount) channel(s)"
             isCapturing = true
+            lifecycle.didStart()
             monitorAIInput(processor, captureID: id)
 
             engineObserver = NotificationCenter.default.publisher(
@@ -241,9 +256,18 @@ final class AudioCaptureManager: ObservableObject {
         }
     }
 
-    func stopCapture(owner expectedOwner: CaptureOwner? = nil) {
+    /// Requests Stop synchronously (invalidating callbacks immediately). The returned task is
+    /// its completion barrier; both Start paths await it before touching AVAudioSession again.
+    @discardableResult
+    func stopCapture(owner expectedOwner: CaptureOwner? = nil) -> Task<Void, Never>? {
         // A disappearing old mode can only stop its own capture, never the new mode's engine.
-        if let expectedOwner, captureOwner != expectedOwner { return }
+        if let expectedOwner, captureOwner != expectedOwner { return wearableStopTask }
+        lifecycle.beginStop()
+        if captureOwner == .wearableMode {
+            lifecycleDiagnostics.lastStop = "stopping"
+            lifecycleDiagnostics.stoppedPreferred = WearableMicState.orientationName(session.preferredInputOrientation)
+            lifecycleDiagnostics.stoppedActual = WearableMicState.orientationName(session.inputOrientation)
+        }
         // Invalidate permission completions and queued readings before touching the engine.
         captureID = nil
         captureOwner = .none
@@ -276,13 +300,18 @@ final class AudioCaptureManager: ObservableObject {
             wearableStopTask = Task { [self] in
                 await stoppedWearable.stop()
                 restoreAndDeactivateSession()
+                lifecycle.finishStop()
+                wearableStopTask = nil // A completed barrier must not masquerade as pending cleanup.
             }
         } else if wearableStopTask == nil {
             restoreAndDeactivateSession()
+            lifecycle.finishStop()
         }
+        return wearableStopTask
     }
 
     private func restoreAndDeactivateSession() {
+        let stoppingWearable = lifecycleDiagnostics.lastStop == "stopping"
         if sessionActive {
             do { try restoreWearablePreferences() }
             catch { errorMessage = error.localizedDescription }
@@ -293,11 +322,24 @@ final class AudioCaptureManager: ObservableObject {
                 errorMessage = "Unable to deactivate audio session: \(error.localizedDescription)"
             }
         }
+        if stoppingWearable {
+            lifecycleDiagnostics.lastStop = sessionActive ? "deactivation failed; backend drained"
+                : (lifecycleDiagnostics.restore.blocksCapture ? "backend drained; required restore failed" : "completed")
+        }
     }
 
     private func restoreWearablePreferences() throws {
         guard let preferences = wearablePreferences else { return }
-        try preferences.restore(session)
+        // There is no public AVAudioSession isActive getter. Record our successful activation
+        // ownership separately; restore explicitly reactivates after restoring category/mode.
+        lifecycleDiagnostics.restoreContext = "\(session.category.rawValue) / \(session.mode.rawValue) / owned active=\(sessionActive)"
+        let report = preferences.restore(session)
+        lifecycleDiagnostics.restore = report
+        lifecycleDiagnostics.lastRestore = report.result
+        if report.blocksCapture {
+            throw CapturePCMError("Unable to restore microphone preferences: \(report.summary)")
+        }
+        // Optional orientation warnings remain visible, but are not retried on every Start.
         wearablePreferences = nil
     }
 

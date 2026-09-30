@@ -230,3 +230,19 @@
 "wearable.ai.error.unsupported_label" = "The classifier returned an unsupported label.";
 "wearable.ai.error.stale_event" = "The audio event expired. Waiting for the next event.";
 "wearable.ai.error.request" = "AI request failed. See advanced diagnostics.";
+
+"settings.required" = "Setup required";
+"wearable.lifecycle.title" = "Capture lifecycle";
+"wearable.lifecycle.state" = "Capture lifecycle state";
+"wearable.lifecycle.stop" = "Last stop result";
+"wearable.lifecycle.restore" = "Last restore result";
+"wearable.lifecycle.savedPreferred" = "Saved preferred orientation";
+"wearable.lifecycle.savedActual" = "Saved actual orientation (read-only)";
+"wearable.lifecycle.started" = "After start: preferred / actual";
+"wearable.lifecycle.stopped" = "Before stop: preferred / actual";
+"wearable.lifecycle.context" = "Before restore: category / mode / owned active";
+"wearable.lifecycle.orientation" = "Orientation restore action";
+"wearable.lifecycle.restored" = "Preferred orientation after restore";
+"wearable.lifecycle.field" = "Restore failed field";
+"wearable.lifecycle.error" = "Restore error code / details";
+"wearable.lifecycle.target" = "Last restore orientation target";

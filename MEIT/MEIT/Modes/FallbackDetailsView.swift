@@ -59,19 +59,11 @@ struct FallbackDetailsView: View {
                 }
                 .pickerStyle(.menu)
             }
-            Section {
-                TextField(language.text("settings.addressPlaceholder"), text: $network.serverAddress)
-                    .keyboardType(.decimalPad)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(network.isBusy)
-                    .accessibilityLabel(language.text("settings.serverAddress"))
-                LabeledContent(language.text("settings.port"), value: "8765")
+            ServerSettingsSection(network: network) {
                 Button(language.text("developer.testConnection")) { network.testConnection() }
                     .disabled(network.isBusy)
                 manualRequestState
-            } header: { Text(language.text("settings.serverAddress")) }
-            footer: { Text(language.text("settings.serverHelp")) }
+            }
 
             Section(language.text("settings.device")) {
                 Picker(language.text("main.devicePosition"), selection: $devices.role) {
@@ -296,5 +288,27 @@ struct FallbackDetailsView: View {
         snapshotTask = nil
         checkingSnapshot = false
         snapshotInfo = nil
+    }
+}
+
+// Shared address editor: both modes bind to the root NetworkManager's persistent setting.
+@MainActor
+struct ServerSettingsSection<Content: View>: View {
+    @ObservedObject var network: NetworkManager
+    @Environment(\.appLanguage) private var language
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Section {
+            TextField(language.text("settings.addressPlaceholder"), text: $network.serverAddress)
+                .keyboardType(.decimalPad)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(network.isBusy)
+                .accessibilityLabel(language.text("settings.serverAddress"))
+            LabeledContent(language.text("settings.port"), value: "8765")
+            content()
+        } header: { Text(language.text("settings.serverAddress")) }
+        footer: { Text(language.text("settings.serverHelp")) }
     }
 }

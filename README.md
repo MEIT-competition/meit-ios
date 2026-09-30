@@ -87,8 +87,62 @@ Wearable은 전용 `/wearable/observe`와 `/wearable/infer`를 사용한다. 기
   `physicalMappingVerified`는 향후 **iOS→laptop metadata/state**로 활용할 수 있다.
   안정화된 direction은 전용 AI 요청 metadata로 사용한다. iPhone→ESP32 직접 전송은 없다.
 - Wearable 캡처가 변경한 session preference는 종료 시 복원한다. 원래 preferred channel 수가 0이면
-  API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 실패하면 표시하고 다음 시작 전에 재시도한다.
+  API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 필수 복원 실패만 다음 시작 전에 재시도하며,
+  orientation은 복원된 stereo route에 적용 가능한 preference만 best-effort로 처리한다.
   기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
+
+### Shared AI server setting / Wearable restart fix — device validation pending
+
+- 기존 주소는 root `NetworkManager.serverAddress`의 메모리에만 있었으며 persistent key가 없었다.
+  이제 `UserDefaults`의 **`meit.serverAddress`** 한 키를 root NetworkManager에서 읽고 쓴다.
+  기존 저장 key의 삭제/rename은 없다. 주소가 있어도 연결 성공으로 초기화하지 않는다.
+- 두 모드가 같은 `ServerSettingsSection` 입력 컴포넌트를 사용한다. Wearable 우측 상단 ⚙️에서 수정하고,
+  메인에는 저장된 주소와 실제 Wearable 연결 상태를 함께 표시한다. 빈 주소만 `설정 필요`다.
+  주소 변경 시 기존 취소/generation 무효화와 connection reset을 유지하며, 다음 요청은 새 주소를 사용한다.
+- 보고된 `Unable to restore microphone preferences: orientation: … -50` 문자열은
+  `WearableAudioPreferences.restore()`의 **`setPreferredInputOrientation(savedPreference)`** catch에서 생성된다.
+  기존 코드는 `preferredInputOrientation`을 저장했으며, read-only `inputOrientation`을 preference로 사용하지 않았다.
+  단 이전 로그에는 setter 인자/route가 없으므로 해당 호출의 -50이 `.none` 때문인지, 그때 route의 제약 때문인지는
+  확정할 수 없다. 확정된 재시작 차단 원인은 optional orientation 실패까지 전체 snapshot의 필수 실패로 취급해
+  snapshot을 남기고, 다음 Start가 같은 복원을 다시 throw한 제어 흐름이다.
+- 복원은 AVCapture Stop/drain 뒤 **저장된 category/mode/options → 활성화 → 현재 availableInputs에서 preferred input
+  재조회/복원 → 현재 built-in source의 polar pattern/data source → channel count → 조건부 orientation → 비활성화**다.
+  사라진 route/data source의 옛 객체를 setter에 전달하지 않고 시스템 선택(nil) 또는 현재 지원 가능한 값만 사용한다.
+- `.none`은 non-stereo 상태이며 orientation reset 명령으로 재전송하지 않는다. 알려진 실제 orientation 값이고,
+  복원된 built-in source의 selected polar pattern이 stereo일 때만 orientation preference를 적용한다.
+  mono measurement에서는 이 preference가 입력 방향을 정의하지 않는다. 실제 preferred getter 값은 고급 진단에
+  그대로 남기며 `none`으로 복원됐다고 위조하지 않는다. 다음 Wearable은 검증된 portrait 요청을 다시 수행한다.
+- category/mode·activation·input·지원되는 pattern/source·channel count의 setter 실패는 필수 실패로 보존한다.
+  orientation 실패는 API 이름/NSError domain·code·message를 경고로 남기고 snapshot을 해제한다.
+  이를 다음 Start마다 반복하지 않는다. 임의 sleep이나 고정 횟수 재시도는 추가하지 않았다.
+- `stopCapture()`는 즉시 generation/콜백을 무효화하는 **중지 요청**이며 반환 task가 완료 barrier다.
+  helper의 기존 session queue에서 delegate 제거, delivery drain, stopRunning, PCM producer drain, I/O/session 참조
+  정리를 수행한다. 기존 AI worker의 `stop()` 뒤 `status()` FIFO barrier까지 기다린 후 preferences 복원과 비활성화를
+  마쳐야 lifecycle이 idle이 된다. 두 Start 경로는 이 task를 기다린다. 완료된 task 참조도 해제한다.
+- `usesApplicationAudioSession=true`, `automaticallyConfiguresApplicationAudioSession=true`, stereo mode 및 portrait
+  시작 요청은 유지한다. iPhone은 기존 `.record + .measurement`/AVAudioEngine을 유지한다.
+  AI protocol/trigger/model, estimator threshold/EMA/semantic mapping, haptic/BLE/motor에는 변경이 없다.
+- 고급 진단에 lifecycle/last Stop/last restore, saved preferred와 actual, Start 이후/Stop 직전 orientation,
+  restore 직전 category/mode/앱 소유 active flag, 마지막 restore target/action/result/error를 기록한다.
+  `AVAudioSession`에는 공개 isActive getter가 없으므로 앱의 활성화 소유 상태와 실제 OS 상태를 혼동하지 않는다.
+- `Tests/CaptureLifecycleTests.swift`는 5회 Start/Stop, pending Stop 중 Start 차단, 즉시 Stop, 선택/필수 복원 실패를
+  검사하는 production pure-state 테스트다. Windows에서 실행하지 않았으며 Xcode test target/현재 Actions에도 없다.
+
+이번 patch 검증: Python 첫 실행 78/79 (기존 classifier failure 테스트가 HTTP 응답 직후 `busy` 해제를
+검사하는 타이밍 race로 1회 실패), 코드 변경 없이 전체 재실행 **79/79 통과**. bridge/테스트는 수정하지 않았다.
+Localization 영어/한국어 각 230 keys, 25개 파일/리소스 참조 및 21개 Swift Sources 등록을 정적으로 확인했다.
+Swift 테스트·Xcode build·실제 기기 restart는 실행하지 않았다.
+
+실기기 acceptance (미수행): 앱 재실행 없이 Start→Stop을 **5회** 반복한다. 매 Start에서 active mode=stereo,
+PCM channels=2, stereo usable=true, LEFT/CENTER/RIGHT 정상, AI 40,000/40,000을 확인한다.
+그 뒤 Start→즉시 Stop→Start, Wearable→iPhone→Wearable 왕복, iPhone 기존 자동 추론/haptic도 검증한다.
+Stop 완료 후 diagnostics의 lifecycle=idle, last Stop=completed 및 restore action/error를 확인한다.
+양쪽 설정에서 주소를 번갈아 바꿔 공유를 확인하고 앱 종료/재실행 후 보존, 빈 주소의 설정 필요 표시,
+오프라인에서 주소 유지, 추론 중 주소 변경 시 이전 응답 폐기를 확인한다.
+
+근거: [Apple microphone selection prerequisites](https://developer.apple.com/library/archive/qa/qa1799/),
+[stereo orientation definitions](https://developer.apple.com/documentation/avfaudio/avaudiosession/stereoorientation),
+[AVCapture automatic audio-session configuration](https://developer.apple.com/documentation/avfoundation/avcapturesession/automaticallyconfiguresapplicationaudiosession).
 
 ### Wearable automatic AI inference — device validation pending
 

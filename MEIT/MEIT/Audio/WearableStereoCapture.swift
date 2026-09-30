@@ -25,6 +25,7 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
     private let onReading: @Sendable (Double, NativeStereoReading) -> Void
     private let onFailure: @Sendable (String) -> Void
     // sessionQueue only.
+    private var drainingProcessor: AIInputProcessor?
     private var session: AVCaptureSession?
     private var input: AVCaptureDeviceInput?
     private var output: AVCaptureAudioDataOutput?
@@ -72,8 +73,20 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
     // Completion is a barrier: no running session or queued PCM producer work remains.
     func stop() async {
         invalidatePendingStart()
+        let draining: AIInputProcessor? = await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in
+                cleanup()
+                continuation.resume(returning: drainingProcessor)
+            }
+        }
+        // stop() enqueues converter/ring cleanup. The existing status read is a FIFO barrier
+        // on that same AI worker: no new queue or converter, and no delay/retry workaround.
+        if let draining { _ = await draining.status() }
         await withCheckedContinuation { continuation in
-            sessionQueue.async { [self] in cleanup(); continuation.resume() }
+            sessionQueue.async { [self] in
+                drainingProcessor = nil
+                continuation.resume()
+            }
         }
     }
 
@@ -154,13 +167,17 @@ final class WearableStereoCapture: NSObject, AVCaptureAudioDataOutputSampleBuffe
         observers.forEach { NotificationCenter.default.removeObserver($0) }
         observers.removeAll()
         // Delivery has drained and cannot enqueue new jobs; finish/release the bounded PCM work.
-        worker.sync {
+        let retiring: AIInputProcessor? = worker.sync {
             stopped = true
-            processor?.stop()
+            let retiring = processor
+            retiring?.stop()
             processor = nil
             adapter = nil
             meter = nil
+            return retiring
         }
+        // A failed start may already have run cleanup; retain its drain until stop completes.
+        if let retiring { drainingProcessor = retiring }
         if let session {
             session.beginConfiguration()
             if let output { session.removeOutput(output) }

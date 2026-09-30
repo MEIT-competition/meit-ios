@@ -9,6 +9,7 @@ struct HardwareModeView: View {
     let onStopCapture: () -> Void
     @Environment(\.appLanguage) private var language
     @State private var showingDiagnostics = false
+    @State private var showingSettings = false
 
     private var isCapturing: Bool {
         audio.captureOwner == .wearableMode && audio.isCapturing
@@ -18,6 +19,13 @@ struct HardwareModeView: View {
         if audio.microphonePermission == .denied { return language.text("main.permission.title") }
         if isCaptureRequested && !isCapturing { return language.text("main.starting.title") }
         return language.text(isCapturing ? "main.listening.title" : "wearable.waiting")
+    }
+
+    private var serverSummary: String {
+        let address = network.configuredServerAddress
+        guard !address.isEmpty else { return language.text("settings.required") }
+        let connected = network.wearable.connectionStatus == "Connected"
+        return "\(address) · \(language.text(connected ? "status.connected" : "status.notConnected"))"
     }
 
     var body: some View {
@@ -39,13 +47,9 @@ struct HardwareModeView: View {
 
                 VStack(alignment: .leading, spacing: 16) {
                     LabeledContent(language.text("wearable.audioInput"), value: language.text("wearable.iPhoneMicrophone"))
-                    TextField(language.text("settings.addressPlaceholder"), text: $network.serverAddress)
-                        .keyboardType(.decimalPad)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel(language.text("settings.serverAddress"))
-                    LabeledContent(language.text("wearable.aiServer"), value: language.connectionStatus(network.wearable.connectionStatus))
+                    LabeledContent(language.text("wearable.aiServer")) {
+                        Text(serverSummary).multilineTextAlignment(.trailing)
+                    }
                     LabeledContent(language.text("hardware.wearable"), value: language.text("status.notConnected"))
                     Text(language.text("wearable.ai.note")).font(.subheadline).foregroundStyle(.secondary)
                 }
@@ -102,6 +106,33 @@ struct HardwareModeView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
             .background(.background)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showingSettings = true } label: {
+                    Image(systemName: "gearshape").frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel(language.text("settings.title"))
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                List {
+                    ServerSettingsSection(network: network) {
+                        Text(serverSummary).foregroundStyle(.secondary)
+                    }
+                }
+                .listStyle(.inset)
+                .navigationTitle(language.text("settings.title"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(language.text("common.done")) { showingSettings = false }
+                    }
+                }
+            }
+            .environment(\.appLanguage, language)
+            .environment(\.locale, language.locale)
         }
         .onAppear { audio.refreshPermission() }
         .sheet(isPresented: $showingDiagnostics) {
