@@ -48,7 +48,7 @@ iPhone 16 실기기에서 검증된 항목:
 
 ### iPhone Mode
 
-여러 대의 iPhone이 함께 동작하는 기존 방식이다.
+iPhone Mode는 여러 대의 iPhone이 함께 동작하여 소리의 방향을 추정하고, 해당 방향의 기기에 진동 알림을 제공한다.
 
 ```text
 iPhone microphone
@@ -59,7 +59,7 @@ iPhone microphone
 
 FRONT / RIGHT / BACK / LEFT role, multi-iPhone direction, 대상 iPhone만 진동시키는 targeted system vibration 기능이 유지된다.
 
-## How it works
+## Wearable Mode data flow
 
 ```text
                    ┌──────────────────────────────┐
@@ -172,7 +172,7 @@ Endpoint와 protocol 상세는 [bridge/README.md](bridge/README.md)를 참고한
 | Wearable automatic AI inference | ✅ |
 | Horn / siren / crash real-device inference | ✅ |
 | AI server connection test | ✅ |
-| iPhone Mode multi-device flow | Implemented |
+| iPhone Mode multi-device flow | Implemented / final 4-device validation pending |
 | Laptop → ESP32 command transport | External integration |
 | Wearable motor output | External integration |
 
