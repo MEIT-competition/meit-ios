@@ -39,6 +39,7 @@ class WearableEvents:
         self.armed = True
         self.cooldown_until = 0
         self.quiet_since = self.quiet_observed = None
+        self.last_event = None  # Most recent completed inference, for /wearable/status.
 
     def observe(self, body):
         session_id = identifier(body.get("session_id"))
@@ -90,6 +91,31 @@ class WearableEvents:
                 self.busy = self.pending = None
                 self.armed = False
                 finish_event_gate(self, self.clock())
+
+    def record(self, result, direction, event_id):
+        """Retain the most recent completed Wearable inference for /wearable/status.
+
+        Uses the core fields parsed from the automatic path's ``last_event`` so the EE belt
+        bridge (``meit-ee`` ``laptop/ios_motor_bridge.py``) can poll
+        ``/wearable/status`` with the same parser it already uses for
+        ``/auto/status``. Recording is publication only: it never selects a
+        coordination direction, completes an automatic event, or queues a haptic.
+        The belt bridge owns the haptic decision, exactly as it does today.
+
+        ``direction`` is the value ``result_metadata`` stored (``left`` /
+        ``center`` / ``right`` for a usable stereo estimate, ``None`` for
+        ``unavailable``); the top-level field keeps the human-readable
+        ``"unavailable"`` so a suppressed event logs a clear reason downstream.
+        """
+        with self.lock:
+            self.last_event = {"event_id": event_id or str(uuid.uuid4()),
+                               "outcome": "completed",
+                               "direction": direction if direction is not None else "unavailable",
+                               "result": result}
+
+    def status(self):
+        with self.lock:
+            return {"last_event": self.last_event}
 
 
 def result_metadata(result, direction):

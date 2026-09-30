@@ -39,7 +39,8 @@ class BridgeServer(ThreadingHTTPServer):
     def diagnostics(self):
         with self.stats_lock:
             counts = dict(self.counters)
-        return {"auto": self.automatic.diagnostics(), **self.coordinator.diagnostics_counts(),
+        return {"auto": self.automatic.diagnostics(), "wearable": self.wearable.status(),
+                **self.coordinator.diagnostics_counts(),
                 **counts, "model_loaded": True, "inference_busy": self.inference_lock.locked()}
 
     def service_actions(self):
@@ -108,6 +109,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 result = self.server.diagnostics()
             elif path.path == "/auto/status" and not path.query:
                 result = self.server.automatic.status()
+            elif path.path == "/wearable/status" and not path.query:
+                result = self.server.wearable.status()
             elif path.path == "/devices" and not path.query:
                 result = coordinator.list_devices()
             elif path.path == "/direction" and not path.query:
@@ -238,6 +241,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     # Never select a coordination direction, complete an auto event, or queue haptics.
                     self.server.count("inference_count")
                     result = result_metadata(self.server.adapter.infer_auto(payload), direction)
+                    # Publish the completed inference so the EE belt bridge can poll
+                    # /wearable/status. Publication only: no direction selection,
+                    # auto-event completion, or haptic queueing on this path.
+                    self.server.wearable.record(result, direction, wearable_ids["X-Wearable-Event"])
                     logging.getLogger("meit.wearable").info("[WEARABLE] POST /wearable/infer completed")
                 elif automatic:
                     self.server.automatic.check_inference(claimed)
@@ -253,11 +260,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
         except ProtocolError as error:
             if claimed is not None:
                 self.finish_failed_auto(claimed)
+            # Release the Wearable slot BEFORE the error response, matching the
+            # success path, so a phone that retries after reading the error never
+            # races the slot release and gets a spurious 409. finish() is
+            # idempotent, so the finally below is a harmless no-op afterwards.
+            if wearable_claim is not None:
+                self.server.wearable.finish(wearable_claim)
             self.fail(error.status, error.code, error.message)
             return
         except Exception as error:
             if claimed is not None:
                 self.finish_failed_auto(claimed)
+            if wearable_claim is not None:
+                self.server.wearable.finish(wearable_claim)
             # Keep private paths and model internals out of the HTTP response and logs.
             print(f"Inference failed ({type(error).__name__}).", file=sys.stderr)
             self.fail(500, "inference_failed", "Existing meit-ai inference failed; check bridge terminal.")

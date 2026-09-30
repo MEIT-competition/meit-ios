@@ -74,6 +74,60 @@ class WearableHTTPTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(result["direction"], direction if direction in ("center", "right") else None)
 
+    def get(self, path):
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+        try:
+            connection.request("GET", path)
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
+    def test_status_is_empty_until_an_inference_completes(self):
+        self.assertEqual(self.get("/wearable/status"), (200, {"last_event": None}))
+
+    def test_completed_inference_is_published_for_the_belt_bridge(self):
+        # This is the EE belt-bridge contract: /wearable/status must carry the
+        # same last_event shape the EE bridge already parses from /auto/status.
+        _, event = self.observe()
+        status, _ = self.request(headers={**self.headers, "X-Wearable-Direction": "left",
+            "X-Wearable-Session": self.session_id, "X-Wearable-Event": event["event_id"]})
+        self.assertEqual(status, 200)
+        status, published = self.get("/wearable/status")
+        self.assertEqual(status, 200)
+        last = published["last_event"]
+        self.assertEqual(last["event_id"], event["event_id"])
+        self.assertEqual(last["outcome"], "completed")
+        self.assertEqual(last["direction"], "left")
+        self.assertEqual(last["result"]["label"], "horn")
+        self.assertTrue(last["result"]["danger"])
+
+    def test_unavailable_direction_is_published_as_unavailable(self):
+        self.request(headers=self.headers)  # no X-Wearable-Direction -> unavailable
+        self.assertEqual(self.get("/wearable/status")[1]["last_event"]["direction"], "unavailable")
+
+    def test_status_polling_is_read_only_and_keeps_one_event_id(self):
+        self.request(headers={**self.headers, "X-Wearable-Direction": "right"})
+        first = self.get("/wearable/status")
+        calls = self.adapter.infer_auto.call_count
+        with patch.object(self.server.coordinator, "enqueue") as enqueue, \
+             patch.object(self.server.automatic, "complete") as complete:
+            self.assertEqual(self.get("/wearable/status"), first)
+            self.assertEqual(self.get("/diagnostics")[1]["wearable"], first[1])
+            enqueue.assert_not_called()
+            complete.assert_not_called()
+        self.assertEqual(self.adapter.infer_auto.call_count, calls)
+
+    def test_status_preserves_non_alert_result_and_failed_inference_does_not_publish(self):
+        self.adapter.infer_auto.return_value = {**self.prediction, "label": "normal", "danger": False}
+        self.request(headers={**self.headers, "X-Wearable-Direction": "center"})
+        retained = self.get("/wearable/status")[1]
+        self.assertFalse(retained["last_event"]["result"]["danger"])
+        self.adapter.infer_auto.side_effect = RuntimeError("test failure")
+        self.assertEqual(self.request()[0], 500)
+        self.assertIsNone(self.server.wearable.busy)
+        self.assertEqual(self.get("/wearable/status")[1], retained)
+
     def test_wrong_pcm_sizes_and_metadata_do_not_classify(self):
         for size in (0, 79999, 80001):
             self.assertEqual(self.request(body=bytes(size))[1]["error"]["code"], "invalid_length")

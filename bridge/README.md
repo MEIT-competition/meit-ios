@@ -746,7 +746,42 @@ and the external `decision.judge` policy. Direction is validated/echoed metadata
 judge produces a boolean `danger` here; no pattern/intensity command is used or sent. Current policy
 is confidence >= 0.4, dB >= -50, non-normal label. Normal/low-confidence results remain visible with
 `danger=false`. Neither `coordinator.selection/after_inference` nor `automatic.complete` is called.
-No haptic/BLE/ESP32/motor output is added.
+This bridge still performs no BLE/ESP32/motor output itself.
+
+### `GET /wearable/status` — belt-bridge hand-off
+
+Each completed `/wearable/infer` is retained as the most recent Wearable event and served here,
+so the EE belt bridge (`meit-ee` `laptop/ios_motor_bridge.py`) can drive the wearable motors from
+a single iPhone without four-phone coordination. It is a read-only publication: recording selects
+no direction, completes no automatic event, and queues no haptic — the belt bridge alone decides
+what the wearer feels.
+
+The core fields match the `/auto/status` `last_event` parser contract (not its full diagnostics
+shape). The reviewed teammate `meit-ee.zip` consumer supports endpoint selection:
+`python -m laptop.ios_motor_bridge --status-path /wearable/status` (run in that EE version).
+The local `C:\meit-ee` checkout reviewed separately lacks this option; confirm the consumer version
+before running it. End-to-end motor validation remains external integration:
+
+```json
+{
+  "last_event": {
+    "event_id": "<runtime UUID>",
+    "outcome": "completed",
+    "direction": "left | center | right | unavailable",
+    "result": {"label": "horn|siren|crash|normal", "confidence": 0.0,
+               "inference_ms": 0.0, "danger": true, "direction": "left|center|right|null"}
+  }
+}
+```
+
+`last_event` is `null` until the first inference completes. `unavailable` (a stereo estimate the
+app could not trust) is published verbatim so the belt bridge suppresses it with a clear reason.
+The completed event is also included under `wearable` in `GET /diagnostics`. This retains one
+latest result, not a queue or an acknowledged motor command: failed inference does not replace it,
+and intermediate results can be missed between polls. A consumer must deduplicate `event_id`,
+ignore pre-existing results at startup, and suppress `danger=false` and unusable direction.
+Freshness after an outage and actual LEFT/CENTER/RIGHT-to-motor policy must be validated in the
+external consumer before enabling hardware output. No motor integration success is claimed here.
 
 Errors retain the JSON error envelope. PCM/direction errors: 400; occupied slot or stale event: 409;
 classifier exception: sanitized 500 `inference_failed`; unsupported label or invalid result: 502.
