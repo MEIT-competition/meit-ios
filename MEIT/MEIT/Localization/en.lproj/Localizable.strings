@@ -246,3 +246,14 @@
 "wearable.lifecycle.field" = "Restore failed field";
 "wearable.lifecycle.error" = "Restore error code / details";
 "wearable.lifecycle.target" = "Last restore orientation target";
+
+"server.connection.notConfigured" = "Setup required";
+"server.connection.unknown" = "Not checked";
+"server.connection.checking" = "Checking";
+"server.connection.connected" = "Connected";
+"server.connection.disconnected" = "Not connected";
+"server.test.time" = "Last connection test";
+"server.test.result" = "Last test result";
+"server.test.http" = "Connection test HTTP status";
+"server.test.address" = "Tested server address";
+"server.test.error" = "Last network error";

@@ -37,6 +37,20 @@ private final class RejectRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
+// HTTP reachability is shared across modes; inference and iPhone registration state stay separate.
+enum ServerConnectionState: String {
+    case notConfigured, unknown, checking, connected, disconnected
+    var localizationKey: String { "server.connection.\(rawValue)" }
+}
+
+struct ServerConnectionDiagnostics {
+    var lastTestAt: Date?
+    var testedAddress: String?
+    var testState: ServerConnectionState?
+    var testHTTPStatus: Int?
+    var lastNetworkError: String?
+}
+
 @MainActor
 final class NetworkManager: ObservableObject {
     private let defaults: UserDefaults
@@ -48,12 +62,16 @@ final class NetworkManager: ObservableObject {
                 defaults.set(serverAddress, forKey: Self.serverAddressKey)
                 cancel()
                 stopWearableInference()
+                serverConnection = configuredServerAddress.isEmpty ? .notConfigured : .unknown
+                connectionDiagnostics = ServerConnectionDiagnostics()
                 connectionStatus = "Not Tested"
                 hasConnected = false
                 errorMessage = nil
             }
         }
     }
+    @Published private(set) var serverConnection: ServerConnectionState = .notConfigured
+    @Published private(set) var connectionDiagnostics = ServerConnectionDiagnostics()
     @Published private(set) var connectionStatus = "Not Tested"
     // A later manual timeout must not disable foreground registration recovery.
     // Cleared only when the user changes the server address.
@@ -75,6 +93,7 @@ final class NetworkManager: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         serverAddress = defaults.string(forKey: Self.serverAddressKey) ?? ""
+        serverConnection = configuredServerAddress.isEmpty ? .notConfigured : .unknown
         // An address is configuration, never evidence of a live connection.
     }
 
@@ -115,6 +134,7 @@ final class NetworkManager: ObservableObject {
     }
 
     func testConnection() {
+        guard !configuredServerAddress.isEmpty else { return }
         run(sending: false) { [self] in
             let data = try await request(path: "/health")
             try Task.checkCancellation()
@@ -123,6 +143,9 @@ final class NetworkManager: ObservableObject {
                   health.status == "ok" else {
                 throw NetworkFailure(message: "Malformed /health response.")
             }
+            serverConnection = .connected
+            connectionDiagnostics.testState = .connected
+            connectionDiagnostics.lastNetworkError = nil
             hasConnected = true
             connectionStatus = "Connected"
         }
@@ -155,6 +178,12 @@ final class NetworkManager: ObservableObject {
     }
 
     func cancel() {
+        if isBusy && !isSending {
+            connectionDiagnostics.testState = .unknown
+            if serverConnection == .checking {
+                serverConnection = configuredServerAddress.isEmpty ? .notConfigured : .unknown
+            }
+        }
         operationID = nil
         operation?.cancel()
         operation = nil
@@ -170,6 +199,14 @@ final class NetworkManager: ObservableObject {
         isBusy = true
         isSending = sending
         errorMessage = nil
+        if !sending {
+            serverConnection = .checking
+            connectionDiagnostics.lastTestAt = Date()
+            connectionDiagnostics.testedAddress = configuredServerAddress
+            connectionDiagnostics.testState = .checking
+            connectionDiagnostics.testHTTPStatus = nil
+            connectionDiagnostics.lastNetworkError = nil
+        }
         if sending { result = nil }
         operation = Task { [weak self] in
             guard let self else { return }
@@ -179,6 +216,11 @@ final class NetworkManager: ObservableObject {
             } catch {
                 guard operationID == id, !Task.isCancelled else { return }
                 connectionStatus = "Failed"
+                if !sending {
+                    serverConnection = .disconnected
+                    connectionDiagnostics.testState = .disconnected
+                    connectionDiagnostics.lastNetworkError = error.localizedDescription
+                }
                 if let urlError = error as? URLError {
                     switch urlError.code {
                     case .timedOut:
@@ -198,6 +240,11 @@ final class NetworkManager: ObservableObject {
             isBusy = false
             isSending = false
         }
+    }
+
+    private func recordConnectionFailure(_ error: Error) {
+        serverConnection = configuredServerAddress.isEmpty ? .notConfigured : .disconnected
+        connectionDiagnostics.lastNetworkError = error.localizedDescription
     }
 
     private func endpoint(path: String, query: [URLQueryItem]) throws -> URL {
@@ -223,7 +270,14 @@ final class NetworkManager: ObservableObject {
 
     private func request(path: String, body: Data? = nil, query: [URLQueryItem] = [],
                          coordination: Bool = false, headers: [String: String] = [:]) async throws -> Data {
-        var request = URLRequest(url: try endpoint(path: path, query: query))
+        let tracksConnection = path == "/health" || path == "/wearable/observe" || path == "/wearable/infer"
+        let url: URL
+        do { url = try endpoint(path: path, query: query) }
+        catch {
+            if tracksConnection { recordConnectionFailure(error) }
+            throw error
+        }
+        var request = URLRequest(url: url)
         request.timeoutInterval = coordination ? 1 : (body == nil ? 10 : 60)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
@@ -239,8 +293,24 @@ final class NetworkManager: ObservableObject {
         }
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let transport = coordination ? coordinationSession : session
-        let (data, response) = try await transport.data(for: request)
+        let reply: (Data, URLResponse)
+        do { reply = try await transport.data(for: request) }
+        catch {
+            // Address changes/Stop cancel the old task. Its failure must not overwrite new state.
+            try Task.checkCancellation()
+            if tracksConnection { recordConnectionFailure(error) }
+            throw error
+        }
         try Task.checkCancellation()
+        let (data, response) = reply
+        if path == "/health" {
+            connectionDiagnostics.testHTTPStatus = (response as? HTTPURLResponse)?.statusCode
+        } else if tracksConnection, response is HTTPURLResponse {
+            // Even a classifier 500/409 is an HTTP response, not a lost connection.
+            // AI/protocol failures still propagate into the separate inference error state.
+            serverConnection = .connected
+            // Retain the last network error for diagnostics across automatic recovery.
+        }
         guard let http = response as? HTTPURLResponse, data.count <= 16_384,
               http.mimeType == "application/json" else {
             throw NetworkFailure(message: "Expected a small JSON response from the MEIT bridge.", code: "invalid_response")
@@ -265,7 +335,6 @@ struct WearableInferenceResult: Decodable {
 }
 
 struct WearableInferenceState {
-    var connectionStatus = "Not Tested"
     var inFlight = false
     var result: WearableInferenceResult?
     var sentDirection: String?
@@ -305,7 +374,6 @@ extension NetworkManager {
                           (event.event_id.map({ UUID(uuidString: $0) != nil }) ?? true) else {
                         throw NetworkFailure(message: "Invalid Wearable observation response.", code: "invalid_response")
                     }
-                    wearable.connectionStatus = "Connected"
                     if let eventID = event.event_id {
                         try await inferWearableEvent(eventID, sessionID: id, audio: audio)
                     }
@@ -322,7 +390,6 @@ extension NetworkManager {
                     } else {
                         wearable.errorKey = "wearable.ai.error.invalid_response"
                     }
-                    wearable.connectionStatus = "Failed"
                     delay = 1_000_000_000
                     // Never stop microphone capture or retry a consumed audio event.
                 }
@@ -381,7 +448,6 @@ extension NetworkManager {
         wearable.result = response
         wearable.resultTime = Date()
         wearable.latencyMilliseconds = Date().timeIntervalSince(started) * 1000
-        wearable.connectionStatus = "Connected"
         wearable.inFlight = false
         // No DeviceCoordinator, command polling, or HapticManager call on this path.
     }

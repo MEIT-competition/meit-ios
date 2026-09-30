@@ -143,7 +143,12 @@ private struct WearableAdvancedDiagnosticsView: View {
                 Text(language.text("wearable.testInstructions")).foregroundStyle(.secondary)
             }
             Section(language.text("wearable.aiServer")) {
-                value("wearable.aiServer", language.connectionStatus(network.wearable.connectionStatus))
+                value("wearable.aiServer", language.text(network.serverConnection.localizationKey))
+                value("server.test.time", network.connectionDiagnostics.lastTestAt?.formatted(date: .omitted, time: .standard) ?? "—")
+                value("server.test.result", network.connectionDiagnostics.testState.map { language.text($0.localizationKey) } ?? "—")
+                value("server.test.http", network.connectionDiagnostics.testHTTPStatus.map { String($0) } ?? "—")
+                value("server.test.address", network.connectionDiagnostics.testedAddress ?? "—")
+                value("server.test.error", network.connectionDiagnostics.lastNetworkError ?? "—")
                 value("wearable.ai.inFlight", network.wearable.inFlight ? "true" : "false")
                 value("wearable.ai.label", network.wearable.result.map { language.soundLabel($0.label) } ?? "—")
                 value("wearable.ai.confidence", network.wearable.result.map { language.text("main.confidence", $0.confidence * 100) } ?? "—")

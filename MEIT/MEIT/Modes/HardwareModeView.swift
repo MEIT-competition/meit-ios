@@ -24,8 +24,7 @@ struct HardwareModeView: View {
     private var serverSummary: String {
         let address = network.configuredServerAddress
         guard !address.isEmpty else { return language.text("settings.required") }
-        let connected = network.wearable.connectionStatus == "Connected"
-        return "\(address) · \(language.text(connected ? "status.connected" : "status.notConnected"))"
+        return "\(address) · \(language.text(network.serverConnection.localizationKey))"
     }
 
     var body: some View {
@@ -118,9 +117,7 @@ struct HardwareModeView: View {
         .sheet(isPresented: $showingSettings) {
             NavigationStack {
                 List {
-                    ServerSettingsSection(network: network) {
-                        Text(serverSummary).foregroundStyle(.secondary)
-                    }
+                    ServerSettingsSection(network: network)
                 }
                 .listStyle(.inset)
                 .navigationTitle(language.text("settings.title"))

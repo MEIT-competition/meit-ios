@@ -59,11 +59,7 @@ struct FallbackDetailsView: View {
                 }
                 .pickerStyle(.menu)
             }
-            ServerSettingsSection(network: network) {
-                Button(language.text("developer.testConnection")) { network.testConnection() }
-                    .disabled(network.isBusy)
-                manualRequestState
-            }
+            ServerSettingsSection(network: network)
 
             Section(language.text("settings.device")) {
                 Picker(language.text("main.devicePosition"), selection: $devices.role) {
@@ -293,10 +289,9 @@ struct FallbackDetailsView: View {
 
 // Shared address editor: both modes bind to the root NetworkManager's persistent setting.
 @MainActor
-struct ServerSettingsSection<Content: View>: View {
+struct ServerSettingsSection: View {
     @ObservedObject var network: NetworkManager
     @Environment(\.appLanguage) private var language
-    @ViewBuilder var content: () -> Content
 
     var body: some View {
         Section {
@@ -307,7 +302,13 @@ struct ServerSettingsSection<Content: View>: View {
                 .disabled(network.isBusy)
                 .accessibilityLabel(language.text("settings.serverAddress"))
             LabeledContent(language.text("settings.port"), value: "8765")
-            content()
+            Button(language.text("developer.testConnection")) { network.testConnection() }
+                .disabled(network.isBusy || network.configuredServerAddress.isEmpty)
+            LabeledContent(language.text("wearable.aiServer"), value: language.text(network.serverConnection.localizationKey))
+            if network.isBusy && !network.isSending {
+                ProgressView(language.text("developer.connecting"))
+                Button(language.text("developer.cancel")) { network.cancel() }
+            }
         } header: { Text(language.text("settings.serverAddress")) }
         footer: { Text(language.text("settings.serverHelp")) }
     }

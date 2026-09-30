@@ -246,3 +246,14 @@
 "wearable.lifecycle.field" = "복원 실패 항목";
 "wearable.lifecycle.error" = "복원 오류 코드 / 상세";
 "wearable.lifecycle.target" = "최근 orientation 복원 대상";
+
+"server.connection.notConfigured" = "설정 필요";
+"server.connection.unknown" = "확인 안 됨";
+"server.connection.checking" = "확인 중";
+"server.connection.connected" = "연결됨";
+"server.connection.disconnected" = "연결 안 됨";
+"server.test.time" = "최근 연결 테스트";
+"server.test.result" = "최근 테스트 결과";
+"server.test.http" = "연결 테스트 HTTP 상태";
+"server.test.address" = "테스트한 서버 주소";
+"server.test.error" = "최근 네트워크 오류";

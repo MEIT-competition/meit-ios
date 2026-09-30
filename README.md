@@ -54,9 +54,9 @@ Wearable은 전용 `/wearable/observe`와 `/wearable/infer`를 사용한다. 기
   앱 진입이나 foreground 복귀만으로 마이크를 자동 시작하지 않는다.
 - 메인은 listening/waiting, 실제 live audio RMS meter, AI server 연결 상태 / wearable 미연결 상태,
   실험적 stream-semantic direction 또는 unavailable, 시작/중지 action과 diagnostics를 표시한다.
-  AI server는 Wearable 관측 요청의 실제 성공/실패를 표시하며, 모터 연결은 not connected다.
+  AI server는 공통 health test와 Wearable HTTP 요청의 실제 연결 상태를 표시하며, 모터 연결은 not connected다.
   주소 입력과 최근 AI 결과만 추가하고, 상세 요청 정보는 고급 진단에 둔다.
-  iPhone mode에서 과거 성공한 health check를 Wearable 연결 성공으로 표시하지 않는다.
+  두 모드가 같은 서버의 HTTP 연결 상태를 공유한다. AI 추론/기기 등록 상태는 별도로 유지한다.
 - `ContentView`가 기존 `AudioCaptureManager` 한 개를 소유한다.
   Capture ownership은 `none / iphoneMode / wearableMode`다. iPhone은 기존 AVAudioEngine/tap,
   Wearable은 AVCaptureSession을 사용하며 두 backend를 동시에 시작하지 않는다.
@@ -90,6 +90,38 @@ Wearable은 전용 `/wearable/observe`와 `/wearable/infer`를 사용한다. 기
   API가 0을 거부하므로 시작 전 실제 채널 수를 복원한다. 필수 복원 실패만 다음 시작 전에 재시도하며,
   orientation은 복원된 stereo route에 적용 가능한 preference만 best-effort로 처리한다.
   기존 converter/ring, NetworkManager, DeviceCoordinator, HapticManager, iPhone mode 화면/기능은 유지한다.
+
+### Shared connection test / connection state — device validation pending
+
+기존 Wearable 메인은 별도 `wearable.connectionStatus`의 `Not Tested`까지 연결 안 됨으로 표시했고,
+해당 상태는 capture 후 `/wearable/observe`를 보낼 때만 갱신됐다. 설정에는 연결 테스트 버튼이 없었다.
+주소 persistence나 Wearable URL이 별도 주소를 쓰는 문제는 없었다. 실제 iPhone HTTP 실패 원인은
+기존 표시만으로 단정할 수 없다. Windows localhost TCP 성공은 iPhone의 HTTP 접근 성공과 별개다.
+
+- 두 모드의 `ServerSettingsSection`이 이제 주소/port/연결 테스트/진행/취소/연결 상태를 모두 공유한다.
+  기존 `NetworkManager.testConnection()` → `GET /health` → `{"status":"ok"}` 검증을 그대로 사용한다.
+  새 endpoint/네트워크 세션/bridge 변경은 없다. Health에는 PCM, classifier, event gate, haptic 호출이 없다.
+- 연결 상태는 `notConfigured / unknown / checking / connected / disconnected`다.
+  저장 주소가 없으면 설정 필요, 있으면 앱 시작 시 확인 안 됨이다. 주소만으로 connected가 되지 않는다.
+- Wearable 메인은 `주소 · 상태`를 표시한다. 마이크 시작/위험음 재생 없이 ⚙️ → 연결 테스트가 가능하다.
+  Stop은 추론 작업을 정리하지만 마지막 HTTP 연결 확인 결과를 지우지 않는다. 이는 지속 연결 보장이 아니라
+  마지막 실제 요청 결과이며, 새 실패가 관측되면 갱신된다.
+- 주소 source of truth는 기존 `NetworkManager.serverAddress`와 `UserDefaults["meit.serverAddress"]`다.
+  health/observe/infer 모두 같은 `endpoint()`에서 현재 주소로 URL을 만든다. 주소 변경 시 기존 취소와
+  generation 보호를 유지하고, 연결 상태/진단은 새 주소 기준 unknown(빈 주소는 notConfigured)으로 초기화한다.
+- Wearable HTTP 응답은 connected, transport error/timeout은 disconnected로 처리한다.
+  normal/낮은 confidence/불완전 PCM은 연결 실패가 아니다. classifier 500 또는 event 409 응답 역시 HTTP 도달
+  자체는 성공이므로 AI 오류와 연결 상태를 분리한다. Health는 HTTP 200과 정상 JSON 내용을 모두 요구한다.
+- 고급 진단에 마지막 테스트 시각/결과, 테스트 HTTP status, 테스트 주소, 마지막 network error를 표시한다.
+  자동 요청 복구 후에도 마지막 오류는 남겨 조사할 수 있다. 명시적 새 테스트나 주소 변경 시 초기화한다.
+  취소된 이전 요청은 cancellation check 뒤 상태를 갱신하지 않는다.
+- iPhone의 기존 `connectionStatus`/`hasConnected` 기반 등록·추론 의미와 기존 오류/timeout 처리는 유지한다.
+  기존 transport의 health request timeout=10초, URLSession resource timeout=60초 설정도 변경하지 않는다.
+
+실기기 확인: bridge 실행 → Wearable ⚙️에서 현재 Windows 사설 IPv4 입력 → 감지를 시작하지 않고 연결 테스트 →
+connected 및 고급 진단의 HTTP 200 확인 → 감지 시작 후 `/wearable/observe`, 위험음 이후 `/wearable/infer` 확인.
+주소 변경 직후 unknown, 서버 종료 후 재테스트 disconnected, 빈 주소 notConfigured, 앱 재실행 후 주소 유지와
+unknown 상태를 확인한다. iPhone 설정에서도 같은 테스트 버튼을 확인한다. Swift/Xcode/실기기 검증은 별도다.
 
 ### Shared AI server setting / Wearable restart fix — device validation pending
 
